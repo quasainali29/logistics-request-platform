@@ -1,4 +1,6 @@
 import { signIn, signUp } from "./actions";
+import { createClient } from "@/lib/supabase/server";
+import type { AppSettings } from "@/lib/types";
 import Link from "next/link";
 
 export default async function LoginPage({
@@ -9,16 +11,32 @@ export default async function LoginPage({
   const params = await searchParams;
   const isSignup = params.mode === "signup";
 
+  const supabase = await createClient();
+  const { data: settings } = await supabase
+    .from("app_settings")
+    .select("*")
+    .eq("id", true)
+    .single();
+  const appSettings = settings as AppSettings | null;
+  const orgName = appSettings?.org_name ?? "Logistics Request Platform";
+
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="mx-auto mb-3 h-10 w-10 rounded-lg bg-[var(--accent)] flex items-center justify-center text-white font-bold">
-            L
-          </div>
-          <h1 className="text-xl font-semibold text-slate-900">
-            Logistics Request Platform
-          </h1>
+          {appSettings?.logo_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={appSettings.logo_url}
+              alt={orgName}
+              className="mx-auto mb-3 h-10 w-10 object-contain rounded-lg"
+            />
+          ) : (
+            <div className="mx-auto mb-3 h-10 w-10 rounded-lg bg-[var(--accent)] flex items-center justify-center text-white font-bold">
+              {orgName.charAt(0).toUpperCase()}
+            </div>
+          )}
+          <h1 className="text-xl font-semibold text-slate-900">{orgName}</h1>
           <p className="text-sm text-slate-500 mt-1">
             {isSignup ? "Create your account" : "Sign in to continue"}
           </p>

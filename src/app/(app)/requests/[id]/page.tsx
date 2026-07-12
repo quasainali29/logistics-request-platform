@@ -1,13 +1,14 @@
 import { getProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import {
-  STATUS_LABELS,
-  STATUS_COLORS,
+  formatStatusLabel,
+  statusColor,
   PRIORITY_COLORS,
   CATEGORY_LABELS,
-  type RequestStatus,
   type Priority,
   type Category,
+  type WorkflowStage,
+  type WorkflowTransition,
 } from "@/lib/types";
 import { StatusButton, CommentBox } from "./actions-client";
 import { format, parseISO } from "date-fns";
@@ -32,18 +33,29 @@ export default async function RequestDetailPage({
 
   if (!request) notFound();
 
-  const [{ data: comments }, { data: history }] = await Promise.all([
-    supabase
-      .from("comments")
-      .select("*, author:profiles(full_name)")
-      .eq("request_id", id)
-      .order("posted_at", { ascending: true }),
-    supabase
-      .from("status_history")
-      .select("*, changed_by_profile:profiles(full_name)")
-      .eq("request_id", id)
-      .order("changed_at", { ascending: false }),
-  ]);
+  const [{ data: comments }, { data: history }, { data: stages }, { data: transitions }] =
+    await Promise.all([
+      supabase
+        .from("comments")
+        .select("*, author:profiles(full_name)")
+        .eq("request_id", id)
+        .order("posted_at", { ascending: true }),
+      supabase
+        .from("status_history")
+        .select("*, changed_by_profile:profiles(full_name)")
+        .eq("request_id", id)
+        .order("changed_at", { ascending: false }),
+      supabase
+        .from("workflow_stages")
+        .select("*")
+        .eq("category", request.category),
+      supabase
+        .from("workflow_transitions")
+        .select("*")
+        .eq("category", request.category)
+        .eq("from_key", request.status)
+        .order("sort_order", { ascending: true }),
+    ]);
 
   let categoryDetails: Record<string, unknown>[] | null = null;
   if (request.category === "delivery") {
@@ -72,11 +84,17 @@ export default async function RequestDetailPage({
     categoryDetails = data;
   }
 
-  const isManager = profile.role === "logistics_manager";
-  const isCoordinator = profile.role === "logistics_coordinator";
-  const isWarehouse = profile.role === "warehouse_team";
+  const stageList = (stages ?? []) as WorkflowStage[];
+  const availableTransitions = (transitions ?? []) as WorkflowTransition[];
   const isOwner = request.requestor_id === profile.id;
-  const status = request.status as RequestStatus;
+  const status = request.status as string;
+
+  // A transition shows up if the current user's role is explicitly allowed,
+  // or they're a manager (managers can always act — same rule the server
+  // action enforces in requests/actions.ts).
+  const visibleTransitions = availableTransitions.filter(
+    (t) => profile.is_manager || t.allowed_roles.includes(profile.role)
+  );
 
   return (
     <div className="p-8 max-w-4xl">
@@ -84,8 +102,14 @@ export default async function RequestDetailPage({
         <p className="text-xs text-slate-500 mb-1">{request.request_number}</p>
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-semibold text-slate-900">{request.title}</h1>
-          <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[status]}`}>
-            {STATUS_LABELS[status]}
+          <span
+            className={`text-xs px-2 py-0.5 rounded-full ${statusColor(
+              request.category,
+              status,
+              stageList
+            )}`}
+          >
+            {formatStatusLabel(request.category, status, stageList)}
           </span>
           <span
             className={`text-xs px-2 py-0.5 rounded-full ${
@@ -102,44 +126,17 @@ export default async function RequestDetailPage({
         </p>
       </div>
 
-      {/* Action bar — visibility depends on role and current status */}
+      {/* Action bar — driven by the admin-configured workflow for this category */}
       <div className="flex flex-wrap gap-2 mb-8">
-        {isManager && status === "under_review" && (
-          <>
-            <StatusButton requestId={id} status="approved" label="Approve" />
-            <StatusButton requestId={id} status="rejected" label="Reject" variant="danger" />
-          </>
-        )}
-        {(isCoordinator || isManager) && status === "submitted" && (
-          <StatusButton requestId={id} status="under_review" label="Move to Under Review" />
-        )}
-        {(isCoordinator || isManager) &&
-          (status === "submitted" || status === "under_review") && (
-            <StatusButton
-              requestId={id}
-              status="returned_for_info"
-              label="Return for Info"
-              variant="secondary"
-            />
-          )}
-        {(isCoordinator || isManager) && status === "approved" && (
-          <StatusButton requestId={id} status="planning" label="Move to Planning" />
-        )}
-        {(isCoordinator || isManager) && status === "planning" && (
-          <StatusButton requestId={id} status="assigned" label="Mark Resources Assigned" />
-        )}
-        {(isCoordinator || isWarehouse) && status === "assigned" && (
-          <StatusButton requestId={id} status="dispatched" label="Mark Dispatched" />
-        )}
-        {(isCoordinator || isWarehouse) && status === "dispatched" && (
-          <StatusButton requestId={id} status="on_site" label="Mark On Site" />
-        )}
-        {(isCoordinator || isWarehouse) && status === "on_site" && (
-          <StatusButton requestId={id} status="completed" label="Mark Completed" />
-        )}
-        {(isCoordinator || isManager) && status === "completed" && (
-          <StatusButton requestId={id} status="closed" label="Close Request" />
-        )}
+        {visibleTransitions.map((t) => (
+          <StatusButton
+            key={t.id}
+            requestId={id}
+            status={t.to_key}
+            label={t.label}
+            variant={t.variant}
+          />
+        ))}
         {isOwner && status === "returned_for_info" && (
           <StatusButton requestId={id} status="submitted" label="Resubmit" />
         )}
@@ -219,7 +216,9 @@ export default async function RequestDetailPage({
             <ol className="space-y-3">
               {(history ?? []).map((h) => (
                 <li key={h.id} className="text-sm">
-                  <p className="text-slate-900">{STATUS_LABELS[h.status as RequestStatus]}</p>
+                  <p className="text-slate-900">
+                    {formatStatusLabel(request.category, h.status, stageList)}
+                  </p>
                   <p className="text-xs text-slate-500">
                     {h.changed_by_profile?.full_name ?? "System"} ·{" "}
                     {format(parseISO(h.changed_at), "MMM d, h:mm a")}

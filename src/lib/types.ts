@@ -27,18 +27,39 @@ export interface RoleRequestRow {
 
 export type Category = "delivery" | "labor" | "maintenance" | "procurement";
 
-export type RequestStatus =
-  | "submitted"
-  | "under_review"
-  | "returned_for_info"
-  | "approved"
-  | "planning"
-  | "assigned"
-  | "dispatched"
-  | "on_site"
-  | "completed"
-  | "closed"
-  | "rejected";
+// Statuses are now admin-managed per category (see the `workflow_stages`
+// table) rather than a fixed union.
+export type RequestStatus = string;
+
+export interface WorkflowStage {
+  id: string;
+  category: Category;
+  key: string;
+  label: string;
+  color: string;
+  sort_order: number;
+  is_initial: boolean;
+  is_terminal: boolean;
+}
+
+export interface WorkflowTransition {
+  id: string;
+  category: Category;
+  from_key: string;
+  to_key: string;
+  label: string;
+  variant: "primary" | "danger" | "secondary";
+  allowed_roles: string[];
+  sort_order: number;
+}
+
+export interface AppSettings {
+  id: boolean;
+  org_name: string;
+  logo_url: string | null;
+  accent_color: string;
+  updated_at: string;
+}
 
 export type Priority = "low" | "medium" | "high" | "urgent";
 
@@ -98,7 +119,10 @@ export function formatRoleLabel(roleName: string, roles?: RoleRow[]): string {
     .join(" ");
 }
 
-export const STATUS_LABELS: Record<RequestStatus, string> = {
+// Fallback status labels/colors — the seeded defaults, used only when a
+// workflow_stages row isn't available to look up. Prefer passing the real
+// stage list into formatStatusLabel()/statusColor() wherever one is in scope.
+export const STATUS_LABELS: Record<string, string> = {
   submitted: "Submitted",
   under_review: "Under Review",
   returned_for_info: "Returned for Info",
@@ -112,7 +136,7 @@ export const STATUS_LABELS: Record<RequestStatus, string> = {
   rejected: "Rejected",
 };
 
-export const STATUS_COLORS: Record<RequestStatus, string> = {
+export const STATUS_COLORS: Record<string, string> = {
   submitted: "bg-slate-100 text-slate-700",
   under_review: "bg-amber-100 text-amber-800",
   returned_for_info: "bg-orange-100 text-orange-800",
@@ -125,6 +149,29 @@ export const STATUS_COLORS: Record<RequestStatus, string> = {
   closed: "bg-slate-200 text-slate-600",
   rejected: "bg-red-100 text-red-800",
 };
+
+export function formatStatusLabel(
+  category: string,
+  statusKey: string,
+  stages?: WorkflowStage[]
+): string {
+  const fromList = stages?.find((s) => s.category === category && s.key === statusKey)?.label;
+  if (fromList) return fromList;
+  if (STATUS_LABELS[statusKey]) return STATUS_LABELS[statusKey];
+  return statusKey
+    .split("_")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+export function statusColor(
+  category: string,
+  statusKey: string,
+  stages?: WorkflowStage[]
+): string {
+  const fromList = stages?.find((s) => s.category === category && s.key === statusKey)?.color;
+  return fromList ?? STATUS_COLORS[statusKey] ?? "bg-slate-100 text-slate-700";
+}
 
 export const PRIORITY_COLORS: Record<Priority, string> = {
   low: "bg-slate-100 text-slate-600",

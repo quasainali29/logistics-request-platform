@@ -6,6 +6,8 @@ import { sendNotificationEmail } from "@/lib/email";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+
 async function requireManager() {
   const supabase = await createClient();
   const {
@@ -137,4 +139,88 @@ export async function decideRoleRequest(
 
   // Reflect the decision-maker for completeness (not otherwise used).
   void user;
+}
+
+// ============================================================
+// User management
+// ============================================================
+
+export async function inviteUser(formData: FormData) {
+  await requireManager();
+
+  const email = (formData.get("email") as string)?.trim().toLowerCase();
+  const fullName = (formData.get("full_name") as string)?.trim();
+  const role = (formData.get("role") as string) || "requestor";
+
+  if (!email || !fullName) {
+    redirect("/admin?error=Name+and+email+are+required");
+  }
+
+  const admin = createAdminClient();
+  const { error } = await admin.auth.admin.inviteUserByEmail(email, {
+    data: { full_name: fullName, role },
+    redirectTo: `${APP_URL}/set-password`,
+  });
+
+  if (error) {
+    redirect(`/admin?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath("/admin");
+}
+
+export async function deactivateUser(userId: string) {
+  const { supabase, user } = await requireManager();
+
+  if (userId === user.id) {
+    redirect("/admin?error=You+can't+deactivate+your+own+account");
+  }
+
+  const admin = createAdminClient();
+  const { error: authError } = await admin.auth.admin.updateUserById(userId, {
+    ban_duration: "876000h", // effectively permanent, reversed on reactivate
+  });
+  if (authError) {
+    redirect(`/admin?error=${encodeURIComponent(authError.message)}`);
+  }
+
+  await supabase.from("profiles").update({ status: "inactive" }).eq("id", userId);
+
+  revalidatePath("/admin");
+}
+
+export async function reactivateUser(userId: string) {
+  const { supabase } = await requireManager();
+
+  const admin = createAdminClient();
+  const { error: authError } = await admin.auth.admin.updateUserById(userId, {
+    ban_duration: "none",
+  });
+  if (authError) {
+    redirect(`/admin?error=${encodeURIComponent(authError.message)}`);
+  }
+
+  await supabase.from("profiles").update({ status: "active" }).eq("id", userId);
+
+  revalidatePath("/admin");
+}
+
+export async function deleteUser(userId: string) {
+  const { user } = await requireManager();
+
+  if (userId === user.id) {
+    redirect("/admin?error=You+can't+delete+your+own+account");
+  }
+
+  const admin = createAdminClient();
+  const { error } = await admin.auth.admin.deleteUser(userId);
+
+  if (error) {
+    const friendly = /foreign key|violates|constraint/i.test(error.message)
+      ? "Can't delete this user — they still have requests on record. Deactivate them instead to keep the history intact."
+      : error.message;
+    redirect(`/admin?error=${encodeURIComponent(friendly)}`);
+  }
+
+  revalidatePath("/admin");
 }

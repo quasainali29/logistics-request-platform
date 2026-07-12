@@ -1,7 +1,14 @@
 "use client";
 
 import { useTransition } from "react";
-import { assignUserRole, decideRoleRequest, deleteRole } from "./actions";
+import {
+  assignUserRole,
+  decideRoleRequest,
+  deleteRole,
+  deactivateUser,
+  reactivateUser,
+  deleteUser,
+} from "./actions";
 import type { RoleRow } from "@/lib/types";
 
 export function RoleAssignSelect({
@@ -74,6 +81,57 @@ export function RoleRequestDecisionButtons({ requestId }: { requestId: string })
         className="rounded-md border border-slate-300 text-slate-700 px-3 py-1.5 text-xs font-medium hover:bg-slate-50 disabled:opacity-50"
       >
         Reject
+      </button>
+    </div>
+  );
+}
+
+export function UserRowActions({
+  userId,
+  status,
+}: {
+  userId: string;
+  status: "active" | "inactive";
+}) {
+  const [pending, startTransition] = useTransition();
+
+  return (
+    <div className="flex items-center gap-3">
+      {status === "active" ? (
+        <button
+          disabled={pending}
+          onClick={() => {
+            if (confirm("Deactivate this user? They'll immediately lose the ability to sign in.")) {
+              startTransition(() => deactivateUser(userId));
+            }
+          }}
+          className="text-xs text-amber-700 hover:underline disabled:opacity-50"
+        >
+          Deactivate
+        </button>
+      ) : (
+        <button
+          disabled={pending}
+          onClick={() => startTransition(() => reactivateUser(userId))}
+          className="text-xs text-emerald-700 hover:underline disabled:opacity-50"
+        >
+          Reactivate
+        </button>
+      )}
+      <button
+        disabled={pending}
+        onClick={() => {
+          if (
+            confirm(
+              "Permanently delete this user? This can't be undone. If they have any request history, deletion will be blocked automatically — deactivate instead in that case."
+            )
+          ) {
+            startTransition(() => deleteUser(userId));
+          }
+        }}
+        className="text-xs text-red-600 hover:underline disabled:opacity-50"
+      >
+        Delete
       </button>
     </div>
   );

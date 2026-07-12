@@ -1,13 +1,13 @@
 import { getProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import {
-  STATUS_LABELS,
-  STATUS_COLORS,
+  formatStatusLabel,
+  statusColor,
   PRIORITY_COLORS,
   CATEGORY_LABELS,
-  type RequestStatus,
   type Priority,
   type Category,
+  type WorkflowStage,
 } from "@/lib/types";
 import Link from "next/link";
 import { format, parseISO } from "date-fns";
@@ -25,7 +25,12 @@ export default async function RequestsPage() {
     query = query.eq("requestor_id", profile.id);
   }
 
-  const { data: requests } = await query.order("created_at", { ascending: false });
+  const [{ data: requests }, { data: stages }] = await Promise.all([
+    query.order("created_at", { ascending: false }),
+    supabase.from("workflow_stages").select("*"),
+  ]);
+
+  const stageList = (stages ?? []) as WorkflowStage[];
 
   return (
     <div className="p-8">
@@ -84,11 +89,13 @@ export default async function RequestsPage() {
                 </td>
                 <td className="px-4 py-3">
                   <span
-                    className={`text-xs px-2 py-0.5 rounded-full ${
-                      STATUS_COLORS[r.status as RequestStatus]
-                    }`}
+                    className={`text-xs px-2 py-0.5 rounded-full ${statusColor(
+                      r.category,
+                      r.status,
+                      stageList
+                    )}`}
                   >
-                    {STATUS_LABELS[r.status as RequestStatus]}
+                    {formatStatusLabel(r.category, r.status, stageList)}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-slate-600">

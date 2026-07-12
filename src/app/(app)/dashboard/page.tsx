@@ -1,25 +1,14 @@
 import { getProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import {
-  STATUS_LABELS,
-  STATUS_COLORS,
+  formatStatusLabel,
+  statusColor,
   PRIORITY_COLORS,
   CATEGORY_LABELS,
-  type RequestStatus,
+  type WorkflowStage,
 } from "@/lib/types";
 import Link from "next/link";
 import { format, isPast, isToday, parseISO } from "date-fns";
-
-const OPEN_STATUSES: RequestStatus[] = [
-  "submitted",
-  "under_review",
-  "returned_for_info",
-  "approved",
-  "planning",
-  "assigned",
-  "dispatched",
-  "on_site",
-];
 
 export default async function DashboardPage() {
   const profile = await getProfile();
@@ -34,18 +23,32 @@ export default async function DashboardPage() {
     query = query.eq("requestor_id", profile.id);
   }
 
-  const { data: requests } = await query.order("created_at", { ascending: false });
-  const all = requests ?? [];
+  const [{ data: requests }, { data: stages }] = await Promise.all([
+    query.order("created_at", { ascending: false }),
+    supabase.from("workflow_stages").select("*"),
+  ]);
 
-  const open = all.filter((r) => OPEN_STATUSES.includes(r.status));
+  const all = requests ?? [];
+  const stageList = (stages ?? []) as WorkflowStage[];
+
+  // "Terminal" (no further action needed) is now admin-configured per
+  // category/stage instead of a hardcoded status list.
+  const isTerminal = (category: string, statusKey: string) =>
+    stageList.find((s) => s.category === category && s.key === statusKey)?.is_terminal ?? false;
+
+  const open = all.filter((r) => !isTerminal(r.category, r.status));
   const pendingApproval = all.filter((r) => r.status === "under_review");
   const overdue = all.filter(
     (r) =>
       r.date_required &&
       isPast(parseISO(r.date_required)) &&
       !isToday(parseISO(r.date_required)) &&
-      !["completed", "closed", "rejected"].includes(r.status)
+      !isTerminal(r.category, r.status)
   );
+  // "Completed this month" specifically tracks the successful-completion
+  // keys from the default pipeline. If a category's workflow is heavily
+  // restructured with different terminal keys, this metric may need a
+  // matching update.
   const completedThisMonth = all.filter((r) => {
     if (!["completed", "closed"].includes(r.status)) return false;
     const d = parseISO(r.updated_at);
@@ -54,11 +57,7 @@ export default async function DashboardPage() {
   });
 
   const dueSoon = all
-    .filter(
-      (r) =>
-        r.date_required &&
-        !["completed", "closed", "rejected"].includes(r.status)
-    )
+    .filter((r) => r.date_required && !isTerminal(r.category, r.status))
     .sort(
       (a, b) =>
         new Date(a.date_required!).getTime() - new Date(b.date_required!).getTime()
@@ -127,11 +126,13 @@ export default async function DashboardPage() {
                       </p>
                     </div>
                     <span
-                      className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${
-                        STATUS_COLORS[r.status as RequestStatus]
-                      }`}
+                      className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${statusColor(
+                        r.category,
+                        r.status,
+                        stageList
+                      )}`}
                     >
-                      {STATUS_LABELS[r.status as RequestStatus]}
+                      {formatStatusLabel(r.category, r.status, stageList)}
                     </span>
                   </Link>
                 </li>

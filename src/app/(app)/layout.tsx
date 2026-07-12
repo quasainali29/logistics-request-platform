@@ -1,6 +1,7 @@
 import { getProfile } from "@/lib/auth";
 import { signOut } from "@/app/login/actions";
-import { formatRoleLabel } from "@/lib/types";
+import { createClient } from "@/lib/supabase/server";
+import { formatRoleLabel, type AppSettings } from "@/lib/types";
 import Link from "next/link";
 import {
   LayoutDashboard,
@@ -23,6 +24,15 @@ export default async function AppLayout({
   const isStaff = !!profile.is_staff;
   const isManager = !!profile.is_manager;
 
+  const supabase = await createClient();
+  const { data: settings } = await supabase
+    .from("app_settings")
+    .select("*")
+    .eq("id", true)
+    .single();
+  const appSettings = settings as AppSettings | null;
+  const orgName = appSettings?.org_name ?? "Logistics Platform";
+
   const navItems = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, show: true },
     { href: "/requests", label: "Requests", icon: ClipboardList, show: true },
@@ -38,12 +48,19 @@ export default async function AppLayout({
     <div className="min-h-screen flex">
       <aside className="w-60 shrink-0 border-r border-slate-200 bg-white flex flex-col">
         <div className="h-16 flex items-center gap-2 px-5 border-b border-slate-200">
-          <div className="h-7 w-7 rounded-md bg-[var(--accent)] flex items-center justify-center text-white text-sm font-bold">
-            L
-          </div>
-          <span className="font-semibold text-sm text-slate-900">
-            Logistics Platform
-          </span>
+          {appSettings?.logo_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={appSettings.logo_url}
+              alt={orgName}
+              className="h-7 w-7 object-contain rounded-md"
+            />
+          ) : (
+            <div className="h-7 w-7 rounded-md bg-[var(--accent)] flex items-center justify-center text-white text-sm font-bold">
+              {orgName.charAt(0).toUpperCase()}
+            </div>
+          )}
+          <span className="font-semibold text-sm text-slate-900 truncate">{orgName}</span>
         </div>
 
         <nav className="flex-1 py-4 px-3 space-y-1">

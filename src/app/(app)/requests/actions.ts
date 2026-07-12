@@ -111,6 +111,52 @@ export async function updateRequestStatus(
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
+  const [{ data: request }, { data: profile }] = await Promise.all([
+    supabase
+      .from("requests")
+      .select("category, status, requestor_id")
+      .eq("id", requestId)
+      .single(),
+    supabase
+      .from("profiles")
+      .select("role, role_info:roles!profiles_role_fkey(is_manager)")
+      .eq("id", user.id)
+      .single(),
+  ]);
+
+  if (!request) {
+    redirect(`/requests/${requestId}?error=Request+not+found`);
+  }
+
+  const isManager = !!(profile?.role_info as unknown as { is_manager: boolean } | null)
+    ?.is_manager;
+  const isOwnerResubmit =
+    request.requestor_id === user.id &&
+    request.status === "returned_for_info" &&
+    status === "submitted";
+
+  if (!isOwnerResubmit && !isManager) {
+    // Every other transition must be explicitly allowed by the configured
+    // workflow for this category — closes the gap where any staff member
+    // could previously set any status regardless of the button they saw.
+    const { data: transition } = await supabase
+      .from("workflow_transitions")
+      .select("allowed_roles")
+      .eq("category", request.category)
+      .eq("from_key", request.status)
+      .eq("to_key", status)
+      .maybeSingle();
+
+    const allowed = transition?.allowed_roles?.includes(profile?.role ?? "") ?? false;
+    if (!allowed) {
+      redirect(
+        `/requests/${requestId}?error=${encodeURIComponent(
+          "You don't have permission to make this change."
+        )}`
+      );
+    }
+  }
+
   const updates: Record<string, unknown> = { status };
   if (status === "approved") {
     updates.approved_by = user.id;
