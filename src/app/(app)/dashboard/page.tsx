@@ -24,7 +24,7 @@ const OPEN_STATUSES: RequestStatus[] = [
 export default async function DashboardPage() {
   const profile = await getProfile();
   const supabase = await createClient();
-  const isStaff = profile.role !== "requestor";
+  const isStaff = !!profile.is_staff;
 
   let query = supabase
     .from("requests")

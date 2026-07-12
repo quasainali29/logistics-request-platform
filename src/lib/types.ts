@@ -1,8 +1,29 @@
-export type Role =
-  | "requestor"
-  | "logistics_coordinator"
-  | "logistics_manager"
-  | "warehouse_team";
+// Roles are now admin-managed (see the `roles` table) rather than a fixed
+// union — any string key existing in the roles table is valid. The 4 roles
+// below still ship as the seeded defaults.
+export type Role = string;
+
+export interface RoleRow {
+  name: string;
+  label: string;
+  description: string | null;
+  is_staff: boolean;
+  is_manager: boolean;
+  created_at: string;
+}
+
+export interface RoleRequestRow {
+  id: string;
+  user_id: string;
+  requested_role: string;
+  note: string | null;
+  status: "pending" | "approved" | "rejected";
+  requested_at: string;
+  decided_by: string | null;
+  decided_at: string | null;
+  decision_note: string | null;
+  user?: Profile;
+}
 
 export type Category = "delivery" | "labor" | "maintenance" | "procurement";
 
@@ -28,6 +49,10 @@ export interface Profile {
   role: Role;
   department: string | null;
   status: "active" | "inactive";
+  // Derived from the joined `roles` row for the profile's current role.
+  // Populated by getProfile(); defaults to false if the role lookup fails.
+  is_staff?: boolean;
+  is_manager?: boolean;
 }
 
 export interface RequestRow {
@@ -52,12 +77,26 @@ export interface RequestRow {
   requestor?: Profile;
 }
 
-export const ROLE_LABELS: Record<Role, string> = {
+// Fallback labels for the 4 seeded roles, used only when a `roles` row isn't
+// available to look up (e.g. a stale client cache). Prefer passing the real
+// roles list into formatRoleLabel() wherever one is in scope.
+export const ROLE_LABELS: Record<string, string> = {
   requestor: "Requestor",
   logistics_coordinator: "Logistics Coordinator",
   logistics_manager: "Logistics Manager",
   warehouse_team: "Warehouse Team",
 };
+
+export function formatRoleLabel(roleName: string, roles?: RoleRow[]): string {
+  const fromList = roles?.find((r) => r.name === roleName)?.label;
+  if (fromList) return fromList;
+  if (ROLE_LABELS[roleName]) return ROLE_LABELS[roleName];
+  // Unknown custom role with no roles list in scope — humanize the slug.
+  return roleName
+    .split("_")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
 
 export const STATUS_LABELS: Record<RequestStatus, string> = {
   submitted: "Submitted",

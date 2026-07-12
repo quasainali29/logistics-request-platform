@@ -14,7 +14,7 @@ export async function getProfile(): Promise<Profile> {
 
   const { data: profile, error } = await supabase
     .from("profiles")
-    .select("*")
+    .select("*, role_info:roles!profiles_role_fkey(is_staff, is_manager)")
     .eq("id", user.id)
     .single();
 
@@ -22,5 +22,13 @@ export async function getProfile(): Promise<Profile> {
     redirect("/login");
   }
 
-  return profile as Profile;
+  const { role_info, ...rest } = profile as Profile & {
+    role_info: { is_staff: boolean; is_manager: boolean } | null;
+  };
+
+  return {
+    ...rest,
+    is_staff: role_info?.is_staff ?? false,
+    is_manager: role_info?.is_manager ?? false,
+  };
 }

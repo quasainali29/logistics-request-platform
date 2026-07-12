@@ -15,7 +15,7 @@ import { format, parseISO } from "date-fns";
 export default async function RequestsPage() {
   const profile = await getProfile();
   const supabase = await createClient();
-  const isStaff = profile.role !== "requestor";
+  const isStaff = !!profile.is_staff;
 
   let query = supabase
     .from("requests")

@@ -1,6 +1,6 @@
 import { getProfile } from "@/lib/auth";
 import { signOut } from "@/app/login/actions";
-import { ROLE_LABELS } from "@/lib/types";
+import { formatRoleLabel } from "@/lib/types";
 import Link from "next/link";
 import {
   LayoutDashboard,
@@ -10,6 +10,7 @@ import {
   Truck,
   BarChart3,
   Settings,
+  UserCircle,
   LogOut,
 } from "lucide-react";
 
@@ -19,8 +20,8 @@ export default async function AppLayout({
   children: React.ReactNode;
 }) {
   const profile = await getProfile();
-  const isStaff = profile.role !== "requestor";
-  const isManager = profile.role === "logistics_manager";
+  const isStaff = !!profile.is_staff;
+  const isManager = !!profile.is_manager;
 
   const navItems = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, show: true },
@@ -30,6 +31,7 @@ export default async function AppLayout({
     { href: "/fleet", label: "Fleet", icon: Truck, show: isStaff },
     { href: "/reports", label: "Reports", icon: BarChart3, show: isStaff },
     { href: "/admin", label: "Admin", icon: Settings, show: isManager },
+    { href: "/account", label: "My Account", icon: UserCircle, show: true },
   ];
 
   return (
@@ -67,7 +69,7 @@ export default async function AppLayout({
             <p className="text-sm font-medium text-slate-900 truncate">
               {profile.full_name}
             </p>
-            <p className="text-xs text-slate-500">{ROLE_LABELS[profile.role]}</p>
+            <p className="text-xs text-slate-500">{formatRoleLabel(profile.role)}</p>
           </div>
           <form action={signOut}>
             <button
