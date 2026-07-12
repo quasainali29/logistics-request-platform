@@ -146,7 +146,7 @@ export async function decideRoleRequest(
 // ============================================================
 
 export async function inviteUser(formData: FormData) {
-  await requireManager();
+  const { supabase } = await requireManager();
 
   const email = (formData.get("email") as string)?.trim().toLowerCase();
   const fullName = (formData.get("full_name") as string)?.trim();
@@ -154,6 +154,24 @@ export async function inviteUser(formData: FormData) {
 
   if (!email || !fullName) {
     redirect("/admin?error=Name+and+email+are+required");
+  }
+
+  // Guard against re-inviting an email that already has an account — the
+  // invite link authenticates as that existing user, so clicking it would
+  // silently reset their real password. Point the admin at the Users table
+  // (role assignment) instead.
+  const { data: existing } = await supabase
+    .from("profiles")
+    .select("id, full_name")
+    .eq("email", email)
+    .maybeSingle();
+
+  if (existing) {
+    redirect(
+      `/admin?error=${encodeURIComponent(
+        `${existing.full_name} (${email}) already has an account. Use the role dropdown in the Users table instead of inviting them again.`
+      )}`
+    );
   }
 
   const admin = createAdminClient();

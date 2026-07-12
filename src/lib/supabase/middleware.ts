@@ -27,7 +27,9 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const isAuthRoute = request.nextUrl.pathname.startsWith("/login");
+  const isAuthRoute =
+    request.nextUrl.pathname.startsWith("/login") ||
+    request.nextUrl.pathname.startsWith("/forgot-password");
   // Invite links land here with the session token in the URL fragment, which
   // the server never sees — only client-side JS can pick it up. So this
   // route must be reachable without a server-visible session yet.
