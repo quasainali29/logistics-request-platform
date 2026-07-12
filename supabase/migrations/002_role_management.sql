@@ -1,12 +1,15 @@
 -- Logistics Request Management Platform — Migration 002
 -- Adds admin-manageable dynamic roles, a role request/approval workflow,
 -- and closes a self-escalation gap in the original profiles RLS policy.
--- Run this once in the Supabase SQL Editor after schema.sql.
+--
+-- Safe to run multiple times from the top — every statement is idempotent,
+-- so if a previous attempt got interrupted partway (e.g. a lock/deadlock
+-- error from a concurrent connection), just re-run the whole script again.
 
 -- ============================================================
 -- 1. ROLES TABLE (replaces the fixed check-constraint on profiles.role)
 -- ============================================================
-create table public.roles (
+create table if not exists public.roles (
   name text primary key,
   label text not null,
   description text,
@@ -26,8 +29,16 @@ on conflict (name) do nothing;
 
 -- Swap the old fixed check constraint for a foreign key into roles.
 alter table public.profiles drop constraint if exists profiles_role_check;
-alter table public.profiles
-  add constraint profiles_role_fkey foreign key (role) references public.roles(name);
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'profiles_role_fkey'
+  ) then
+    alter table public.profiles
+      add constraint profiles_role_fkey foreign key (role) references public.roles(name);
+  end if;
+end $$;
 
 -- Re-point is_staff() at the roles table so custom roles inherit correct access,
 -- and add is_manager() for admin-only actions (role management).
@@ -54,7 +65,7 @@ $$ language sql stable security definer;
 -- ============================================================
 -- 2. ROLE REQUESTS (self-service request + admin approve/reject)
 -- ============================================================
-create table public.role_requests (
+create table if not exists public.role_requests (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
   requested_role text not null references public.roles(name),
@@ -124,6 +135,7 @@ create trigger enforce_role_change_permission
 -- Managers can now update any profile (needed for direct role assignment
 -- from the admin panel); self-update policy is unchanged and still safe
 -- thanks to the trigger above.
+drop policy if exists "managers can update any profile" on public.profiles;
 create policy "managers can update any profile" on public.profiles
   for update using (public.is_manager());
 
@@ -133,18 +145,12 @@ create policy "managers can update any profile" on public.profiles
 alter table public.roles enable row level security;
 alter table public.role_requests enable row level security;
 
+drop policy if exists "roles readable by authenticated" on public.roles;
 create policy "roles readable by authenticated" on public.roles
   for select using (auth.role() = 'authenticated');
+
+drop policy if exists "roles insertable by managers" on public.roles;
 create policy "roles insertable by managers" on public.roles
   for insert with check (public.is_manager());
-create policy "roles updatable by managers" on public.roles
-  for update using (public.is_manager());
-create policy "roles deletable by managers" on public.roles
-  for delete using (public.is_manager());
 
-create policy "role_requests select own or manager" on public.role_requests
-  for select using (user_id = auth.uid() or public.is_manager());
-create policy "role_requests insert own" on public.role_requests
-  for insert with check (user_id = auth.uid());
-create policy "role_requests update by manager" on public.role_requests
-  for update using (public.is_manager());
+drop policy if exists
