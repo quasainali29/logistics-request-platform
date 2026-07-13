@@ -127,18 +127,18 @@ export async function createRequest(formData: FormData) {
   if (category === "labor") {
     const types = formData.getAll("labor_type[]") as string[];
     const quantities = formData.getAll("labor_qty[]") as string[];
+    const natures = formData.getAll("labor_nature[]") as string[];
     const dateFrom = formData.get("labor_date_from") as string;
     const dateTo = formData.get("labor_date_to") as string;
-    const natureOfWork = formData.get("nature_of_work") as string;
 
     const rows = types
       .map((type, i) => ({
         request_id: request.id,
-        personnel_type: type,
+        personnel_type: type || null,
         quantity: parseInt(quantities[i] || "1", 10),
         date_from: dateFrom || null,
         date_to: dateTo || null,
-        nature_of_work: natureOfWork || null,
+        nature_of_work: natures[i] || null,
       }))
       .filter((r) => r.personnel_type);
 
@@ -148,25 +148,50 @@ export async function createRequest(formData: FormData) {
   }
 
   if (category === "procurement") {
-    const descriptions = formData.getAll("proc_desc[]") as string[];
-    const quantities = formData.getAll("proc_qty[]") as string[];
-    const costs = formData.getAll("proc_cost[]") as string[];
-    const purchasingCategory = formData.get("purchasing_category") as string;
-    const vendor = formData.get("vendor") as string;
+    const purchasingCategory = (formData.get("purchasing_category") as string) || null;
+    const purchasingCategoryOther =
+      (formData.get("purchasing_category_other") as string) || null;
+    const vendor = (formData.get("vendor") as string) || null;
+    const neededByDate = (formData.get("procurement_needed_by") as string) || null;
 
-    const rows = descriptions
-      .map((desc, i) => ({
+    await supabase.from("procurement_details").insert({
+      request_id: request.id,
+      purchasing_category: purchasingCategory,
+      purchasing_category_other: purchasingCategory === "other" ? purchasingCategoryOther : null,
+      vendor,
+      needed_by_date: neededByDate,
+    });
+
+    const names = formData.getAll("proc_item_name[]") as string[];
+    const quantities = formData.getAll("proc_item_qty[]") as string[];
+    const links = formData.getAll("proc_item_link[]") as string[];
+    const imageUrlsRaw = formData.get("proc_item_image_urls_json") as string | null;
+    let imageUrls: (string | null)[] = [];
+    try {
+      imageUrls = imageUrlsRaw ? JSON.parse(imageUrlsRaw) : [];
+    } catch {
+      imageUrls = [];
+    }
+
+    const itemRows = [];
+    for (let i = 0; i < names.length; i++) {
+      const itemName = (names[i] || "").trim();
+      const link = (links[i] || "").trim();
+      const qtyRaw = quantities[i];
+      if (!itemName && !link && !qtyRaw) continue; // skip fully-empty rows
+
+      itemRows.push({
         request_id: request.id,
-        item_description: desc,
-        quantity: parseInt(quantities[i] || "1", 10),
-        unit_cost: parseFloat(costs[i] || "0"),
-        purchasing_category: purchasingCategory || null,
-        vendor: vendor || null,
-      }))
-      .filter((r) => r.item_description);
+        item_no: i + 1,
+        item_description: itemName || `Item ${i + 1}`,
+        quantity: parseInt(qtyRaw || "0", 10) || 0,
+        image_url: imageUrls[i] ?? null,
+        purchasing_link: link || null,
+      });
+    }
 
-    if (rows.length > 0) {
-      await supabase.from("procurement_line_items").insert(rows);
+    if (itemRows.length > 0) {
+      await supabase.from("procurement_line_items").insert(itemRows);
     }
   }
 
