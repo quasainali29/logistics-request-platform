@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { createRequest } from "../actions";
 import { MAINTENANCE_TYPES, type Category } from "@/lib/types";
+import { uploadAttachment, uploadAttachments } from "@/lib/uploadAttachment";
 
 interface DeliveryItemRow {
   key: number;
@@ -14,6 +15,16 @@ function nextKey() {
   return rowKeyCounter;
 }
 
+function isNextRedirectError(err: unknown): boolean {
+  return (
+    !!err &&
+    typeof err === "object" &&
+    "digest" in err &&
+    typeof (err as { digest?: unknown }).digest === "string" &&
+    (err as { digest: string }).digest.startsWith("NEXT_REDIRECT")
+  );
+}
+
 export default function RequestForm() {
   const [category, setCategory] = useState<Category | "">("");
   const [laborRows, setLaborRows] = useState([{ type: "labor", qty: 1 }]);
@@ -22,9 +33,77 @@ export default function RequestForm() {
     { key: nextKey() },
   ]);
   const [photoError, setPhotoError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const formRef = useRef<HTMLFormElement>(null);
+
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setSubmitError("");
+    setSubmitting(true);
+    try {
+      const formEl = e.currentTarget;
+      const raw = new FormData(formEl);
+
+      // Attachments are uploaded directly to Supabase Storage from the
+      // browser first; only the resulting URLs (small strings) go to the
+      // server action. This avoids Vercel's Server Action / Serverless
+      // Function request-body size limits, which real photo/PDF uploads
+      // would otherwise blow past.
+      const out = new FormData();
+      for (const [key, value] of raw.entries()) {
+        if (value instanceof File) continue;
+        out.append(key, value);
+      }
+
+      if (category === "maintenance") {
+        const photoFiles = (raw.getAll("maintenance_photos") as File[])
+          .filter((f) => f && f.size > 0)
+          .slice(0, 6);
+        const photos = await uploadAttachments(photoFiles, "maintenance/pending");
+        out.append("maintenance_photos_json", JSON.stringify(photos));
+
+        const permitFile = raw.get("maintenance_work_permit") as File | null;
+        const permit = await uploadAttachment(permitFile, "maintenance/pending");
+        out.append("maintenance_work_permit_json", JSON.stringify(permit ? [permit] : []));
+      }
+
+      if (category === "delivery") {
+        const permitFile = raw.get("delivery_permit") as File | null;
+        const permit = await uploadAttachment(permitFile, "delivery/pending");
+        out.append("delivery_permit_json", JSON.stringify(permit ? [permit] : []));
+
+        const imageFiles = raw.getAll("delivery_item_image[]") as File[];
+        const images = await Promise.all(
+          imageFiles.map((f) => uploadAttachment(f, "delivery/pending/items"))
+        );
+        out.append(
+          "delivery_item_image_urls_json",
+          JSON.stringify(images.map((r) => r?.url ?? null))
+        );
+      }
+
+      await createRequest(out);
+      // createRequest redirects on success; if it returns normally we're
+      // still on this page, so drop the submitting state.
+      setSubmitting(false);
+    } catch (err) {
+      if (isNextRedirectError(err)) throw err;
+      setSubmitError(
+        err instanceof Error ? err.message : "Something went wrong. Please try again."
+      );
+      setSubmitting(false);
+    }
+  }
 
   return (
-    <form action={createRequest} className="space-y-8 max-w-2xl">
+    <form ref={formRef} onSubmit={handleSubmit} className="space-y-8 max-w-2xl">
+      {submitError && (
+        <div className="rounded-md border border-red-200 bg-red-50 text-red-700 text-sm px-4 py-3">
+          {submitError}
+        </div>
+      )}
+
       <section className="bg-white border border-slate-200 rounded-xl p-6 space-y-4">
         <h2 className="text-sm font-semibold text-slate-900">Request details</h2>
 
@@ -359,9 +438,10 @@ export default function RequestForm() {
 
       <button
         type="submit"
-        className="bg-[var(--accent)] text-white rounded-md px-5 py-2.5 text-sm font-medium hover:opacity-90 transition"
+        disabled={submitting}
+        className="bg-[var(--accent)] text-white rounded-md px-5 py-2.5 text-sm font-medium hover:opacity-90 transition disabled:opacity-60 disabled:cursor-not-allowed"
       >
-        Submit request
+        {submitting ? "Submitting…" : "Submit request"}
       </button>
     </form>
   );
