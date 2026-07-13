@@ -147,6 +147,57 @@ export interface MaintenanceDetails {
   work_permit: AttachmentFile[];
 }
 
+export const PURCHASING_CATEGORIES = [
+  { value: "tools", label: "Tools" },
+  { value: "it_equipment", label: "IT Equipment" },
+  { value: "av_equipment", label: "AV Equipment" },
+  { value: "electrical_equipment", label: "Electrical Equipment" },
+  { value: "other", label: "Other" },
+] as const;
+
+export interface ProcurementDetails {
+  id: string;
+  request_id: string;
+  purchasing_category: string | null;
+  purchasing_category_other: string | null;
+  vendor: string | null;
+  needed_by_date: string | null;
+}
+
+export interface ProcurementItem {
+  id: string;
+  request_id: string;
+  item_no: number;
+  item_description: string | null;
+  quantity: number;
+  image_url: string | null;
+  purchasing_link: string | null;
+}
+
+export const NATURE_OF_WORK_OPTIONS = [
+  { value: "loading_unloading", label: "Loading / Unloading" },
+  { value: "setup_installation", label: "Setup / Installation" },
+  { value: "removal_dismantling", label: "Removal / Dismantling" },
+] as const;
+
+export const LABOR_TYPES = [
+  { value: "labor", label: "Labor" },
+  { value: "welder", label: "Welder" },
+  { value: "carpenter", label: "Carpenter" },
+  { value: "rigger", label: "Rigger" },
+  { value: "electrician", label: "Electrician" },
+] as const;
+
+export interface LaborLine {
+  id: string;
+  request_id: string;
+  personnel_type: string | null;
+  quantity: number;
+  date_from: string | null;
+  date_to: string | null;
+  nature_of_work: string | null;
+}
+
 // Fallback labels for the 4 seeded roles, used only when a `roles` row isn't
 // available to look up (e.g. a stale client cache). Prefer passing the real
 // roles list into formatRoleLabel() wherever one is in scope.
