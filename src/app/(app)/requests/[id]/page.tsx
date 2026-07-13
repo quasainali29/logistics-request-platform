@@ -9,6 +9,9 @@ import {
   type Category,
   type WorkflowStage,
   type WorkflowTransition,
+  type DeliveryDetails,
+  type DeliveryItem,
+  type MaintenanceDetails,
 } from "@/lib/types";
 import { StatusButton, CommentBox } from "./actions-client";
 import { format, parseISO } from "date-fns";
@@ -57,31 +60,41 @@ export default async function RequestDetailPage({
         .order("sort_order", { ascending: true }),
     ]);
 
-  let categoryDetails: Record<string, unknown>[] | null = null;
+  let deliveryDetails: DeliveryDetails | null = null;
+  let deliveryItems: DeliveryItem[] = [];
+  let maintenanceDetails: MaintenanceDetails | null = null;
+  let genericDetails: Record<string, unknown>[] | null = null;
+
   if (request.category === "delivery") {
-    const { data } = await supabase
-      .from("delivery_details")
-      .select("*")
-      .eq("request_id", id);
-    categoryDetails = data;
+    const [{ data: dd }, { data: items }] = await Promise.all([
+      supabase.from("delivery_details").select("*").eq("request_id", id).maybeSingle(),
+      supabase
+        .from("delivery_items")
+        .select("*")
+        .eq("request_id", id)
+        .order("item_no", { ascending: true }),
+    ]);
+    deliveryDetails = dd as DeliveryDetails | null;
+    deliveryItems = (items ?? []) as DeliveryItem[];
   } else if (request.category === "labor") {
     const { data } = await supabase
       .from("labor_personnel_lines")
       .select("*")
       .eq("request_id", id);
-    categoryDetails = data;
+    genericDetails = data;
   } else if (request.category === "maintenance") {
     const { data } = await supabase
       .from("maintenance_details")
       .select("*")
-      .eq("request_id", id);
-    categoryDetails = data;
+      .eq("request_id", id)
+      .maybeSingle();
+    maintenanceDetails = data as MaintenanceDetails | null;
   } else if (request.category === "procurement") {
     const { data } = await supabase
       .from("procurement_line_items")
       .select("*")
       .eq("request_id", id);
-    categoryDetails = data;
+    genericDetails = data;
   }
 
   const stageList = (stages ?? []) as WorkflowStage[];
@@ -161,13 +174,169 @@ export default async function RequestDetailPage({
             )}
           </section>
 
-          {categoryDetails && categoryDetails.length > 0 && (
+          {request.category === "maintenance" && maintenanceDetails && (
+            <section className="bg-white border border-slate-200 rounded-xl p-5">
+              <h2 className="text-sm font-semibold text-slate-900 mb-3">
+                Maintenance details
+              </h2>
+              <dl className="space-y-2 text-sm mb-4">
+                <Row label="Location / area" value={maintenanceDetails.location_area ?? "—"} />
+                <Row
+                  label="Type of maintenance"
+                  value={maintenanceDetails.maintenance_type ?? "—"}
+                />
+                <Row label="Urgency" value={maintenanceDetails.urgency ?? "—"} />
+                <Row
+                  label="Scheduled"
+                  value={
+                    maintenanceDetails.scheduled_date
+                      ? `${format(parseISO(maintenanceDetails.scheduled_date), "MMM d, yyyy")}${
+                          maintenanceDetails.scheduled_time
+                            ? ` · ${maintenanceDetails.scheduled_time}`
+                            : ""
+                        }`
+                      : "—"
+                  }
+                />
+              </dl>
+
+              {maintenanceDetails.photos?.length > 0 && (
+                <div className="mb-4">
+                  <h3 className="text-xs font-semibold text-slate-500 mb-2 uppercase">
+                    Photos
+                  </h3>
+                  <div className="flex flex-wrap gap-2">
+                    {maintenanceDetails.photos.map((p, i) => (
+                      <a
+                        key={i}
+                        href={p.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block w-20 h-20 rounded-md overflow-hidden border border-slate-200"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={p.url} alt={p.name} className="w-full h-full object-cover" />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {maintenanceDetails.work_permit?.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-semibold text-slate-500 mb-1 uppercase">
+                    Work permit
+                  </h3>
+                  {maintenanceDetails.work_permit.map((f, i) => (
+                    <a
+                      key={i}
+                      href={f.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-sm text-[var(--accent)] underline block"
+                    >
+                      {f.name}
+                    </a>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+
+          {request.category === "delivery" && deliveryDetails && (
+            <section className="bg-white border border-slate-200 rounded-xl p-5">
+              <h2 className="text-sm font-semibold text-slate-900 mb-3">Delivery details</h2>
+              <dl className="space-y-2 text-sm mb-4">
+                <Row label="Delivery location" value={deliveryDetails.delivery_location ?? "—"} />
+                <Row
+                  label="Requested"
+                  value={
+                    deliveryDetails.requested_date
+                      ? `${format(parseISO(deliveryDetails.requested_date), "MMM d, yyyy")}${
+                          deliveryDetails.requested_time
+                            ? ` · ${deliveryDetails.requested_time}`
+                            : ""
+                        }`
+                      : "—"
+                  }
+                />
+              </dl>
+
+              {deliveryDetails.files?.length > 0 && (
+                <div className="mb-4">
+                  <h3 className="text-xs font-semibold text-slate-500 mb-1 uppercase">
+                    Delivery permit
+                  </h3>
+                  {deliveryDetails.files.map((f, i) => (
+                    <a
+                      key={i}
+                      href={f.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-sm text-[var(--accent)] underline block"
+                    >
+                      {f.name}
+                    </a>
+                  ))}
+                </div>
+              )}
+
+              {deliveryItems.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-semibold text-slate-500 mb-2 uppercase">
+                    Items
+                  </h3>
+                  <div className="overflow-hidden border border-slate-200 rounded-lg">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+                        <tr>
+                          <th className="text-left px-3 py-2 font-medium">#</th>
+                          <th className="text-left px-3 py-2 font-medium">Item</th>
+                          <th className="text-left px-3 py-2 font-medium">Qty</th>
+                          <th className="text-left px-3 py-2 font-medium">Image</th>
+                          <th className="text-left px-3 py-2 font-medium">Location</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {deliveryItems.map((it) => (
+                          <tr key={it.id}>
+                            <td className="px-3 py-2 text-slate-500">{it.item_no}</td>
+                            <td className="px-3 py-2 text-slate-900">{it.item_name}</td>
+                            <td className="px-3 py-2 text-slate-700">{it.required_quantity}</td>
+                            <td className="px-3 py-2">
+                              {it.image_url ? (
+                                <a href={it.image_url} target="_blank" rel="noreferrer">
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={it.image_url}
+                                    alt={it.item_name}
+                                    className="w-10 h-10 object-cover rounded"
+                                  />
+                                </a>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-slate-700">
+                              {it.current_location ?? "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+
+          {genericDetails && genericDetails.length > 0 && (
             <section className="bg-white border border-slate-200 rounded-xl p-5">
               <h2 className="text-sm font-semibold text-slate-900 mb-3">
                 {CATEGORY_LABELS[request.category as Category]} details
               </h2>
               <pre className="text-xs text-slate-600 bg-slate-50 rounded-md p-3 overflow-x-auto">
-                {JSON.stringify(categoryDetails, null, 2)}
+                {JSON.stringify(genericDetails, null, 2)}
               </pre>
             </section>
           )}
@@ -198,12 +367,21 @@ export default async function RequestDetailPage({
           <section className="bg-white border border-slate-200 rounded-xl p-5">
             <h2 className="text-sm font-semibold text-slate-900 mb-3">Details</h2>
             <dl className="space-y-2 text-sm">
+              <Row label="Project" value={request.project ?? "—"} />
               <Row label="Department" value={request.department ?? "—"} />
               <Row
                 label="Date required"
                 value={
                   request.date_required
                     ? format(parseISO(request.date_required), "MMM d, yyyy")
+                    : "—"
+                }
+              />
+              <Row
+                label="Conclude by"
+                value={
+                  request.conclude_date
+                    ? format(parseISO(request.conclude_date), "MMM d, yyyy")
                     : "—"
                 }
               />
