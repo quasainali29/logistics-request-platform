@@ -83,11 +83,13 @@ export interface RequestRow {
   category: Category;
   requestor_id: string;
   project_id: string | null;
+  project: string | null;
   department: string | null;
   priority: Priority;
   status: RequestStatus;
   date_requested: string;
   date_required: string | null;
+  conclude_date: string | null;
   description: string | null;
   special_instructions: string | null;
   owner_id: string | null;
@@ -96,6 +98,53 @@ export interface RequestRow {
   created_at: string;
   updated_at: string;
   requestor?: Profile;
+}
+
+export interface AttachmentFile {
+  name: string;
+  url: string;
+}
+
+export interface DeliveryDetails {
+  id: string;
+  request_id: string;
+  delivery_location: string | null;
+  requested_date: string | null;
+  requested_time: string | null;
+  files: AttachmentFile[];
+}
+
+export interface DeliveryItem {
+  id: string;
+  request_id: string;
+  item_no: number;
+  item_name: string;
+  required_quantity: number;
+  image_url: string | null;
+  current_location: string | null;
+}
+
+export const MAINTENANCE_TYPES = [
+  "Electrical",
+  "Plumbing",
+  "HVAC",
+  "Structural",
+  "Equipment",
+  "Painting",
+  "Cleaning",
+  "Other",
+] as const;
+
+export interface MaintenanceDetails {
+  id: string;
+  request_id: string;
+  location_area: string | null;
+  maintenance_type: string | null;
+  urgency: "low" | "medium" | "high" | null;
+  scheduled_date: string | null;
+  scheduled_time: string | null;
+  photos: AttachmentFile[];
+  work_permit: AttachmentFile[];
 }
 
 // Fallback labels for the 4 seeded roles, used only when a `roles` row isn't
