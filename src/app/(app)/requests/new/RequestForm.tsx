@@ -2,29 +2,38 @@
 
 import { useState } from "react";
 import { createRequest } from "../actions";
-import type { Category } from "@/lib/types";
+import { MAINTENANCE_TYPES, type Category } from "@/lib/types";
 
-interface Project {
-  id: string;
-  name: string;
+interface DeliveryItemRow {
+  key: number;
 }
 
-export default function RequestForm({ projects }: { projects: Project[] }) {
+let rowKeyCounter = 0;
+function nextKey() {
+  rowKeyCounter += 1;
+  return rowKeyCounter;
+}
+
+export default function RequestForm() {
   const [category, setCategory] = useState<Category | "">("");
   const [laborRows, setLaborRows] = useState([{ type: "labor", qty: 1 }]);
   const [procRows, setProcRows] = useState([{ desc: "", qty: 1, cost: "" }]);
+  const [deliveryItemRows, setDeliveryItemRows] = useState<DeliveryItemRow[]>([
+    { key: nextKey() },
+  ]);
+  const [photoError, setPhotoError] = useState("");
 
   return (
     <form action={createRequest} className="space-y-8 max-w-2xl">
       <section className="bg-white border border-slate-200 rounded-xl p-6 space-y-4">
         <h2 className="text-sm font-semibold text-slate-900">Request details</h2>
 
-        <Field label="Title">
+        <Field label="Title" required>
           <input name="title" required className={inputClass} />
         </Field>
 
         <div className="grid grid-cols-2 gap-4">
-          <Field label="Category">
+          <Field label="Category" required>
             <select
               name="category"
               required
@@ -51,15 +60,13 @@ export default function RequestForm({ projects }: { projects: Project[] }) {
         </div>
 
         <div className="grid grid-cols-2 gap-4">
-          <Field label="Project (optional)">
-            <select name="project_id" className={inputClass} defaultValue="">
-              <option value="">None</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+          <Field label="Project" required>
+            <input
+              name="project"
+              required
+              placeholder="e.g. Downtown Warehouse Expansion"
+              className={inputClass}
+            />
           </Field>
 
           <Field label="Department">
@@ -74,9 +81,15 @@ export default function RequestForm({ projects }: { projects: Project[] }) {
           </Field>
         </div>
 
-        <Field label="Date required">
-          <input type="date" name="date_required" className={inputClass} />
-        </Field>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Date required">
+            <input type="date" name="date_required" className={inputClass} />
+          </Field>
+
+          <Field label="Conclude by">
+            <input type="date" name="conclude_date" className={inputClass} />
+          </Field>
+        </div>
 
         <Field label="Description">
           <textarea name="description" rows={3} className={inputClass} />
@@ -90,12 +103,78 @@ export default function RequestForm({ projects }: { projects: Project[] }) {
       {category === "delivery" && (
         <section className="bg-white border border-slate-200 rounded-xl p-6 space-y-4">
           <h2 className="text-sm font-semibold text-slate-900">Delivery details</h2>
-          <Field label="Delivery location">
+          <Field label="Delivery location" required>
             <input name="delivery_location" required className={inputClass} />
           </Field>
-          <Field label="Requested date">
-            <input type="date" name="delivery_requested_date" className={inputClass} />
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Requested date">
+              <input type="date" name="delivery_requested_date" className={inputClass} />
+            </Field>
+            <Field label="Requested time">
+              <input type="time" name="delivery_requested_time" className={inputClass} />
+            </Field>
+          </div>
+          <Field label="Delivery permit (optional)">
+            <input
+              type="file"
+              name="delivery_permit"
+              accept="image/*,.pdf"
+              className={fileInputClass}
+            />
           </Field>
+
+          <div>
+            <p className="text-sm font-medium text-slate-700 mb-2">Items needed</p>
+            <div className="space-y-3">
+              {deliveryItemRows.map((row, i) => (
+                <div
+                  key={row.key}
+                  className="border border-slate-200 rounded-lg p-3 grid sm:grid-cols-5 gap-2 items-start"
+                >
+                  <div className="sm:col-span-1">
+                    <label className="block text-xs text-slate-500 mb-1">Item no.</label>
+                    <div className="text-sm text-slate-500 px-1 py-2">{i + 1}</div>
+                  </div>
+                  <div className="sm:col-span-1">
+                    <label className="block text-xs text-slate-500 mb-1">Item name</label>
+                    <input name="delivery_item_name[]" className={inputClass} />
+                  </div>
+                  <div className="sm:col-span-1">
+                    <label className="block text-xs text-slate-500 mb-1">Required qty</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      name="delivery_item_qty[]"
+                      className={inputClass}
+                    />
+                  </div>
+                  <div className="sm:col-span-1">
+                    <label className="block text-xs text-slate-500 mb-1">Image</label>
+                    <input
+                      type="file"
+                      name="delivery_item_image[]"
+                      accept="image/*"
+                      className={fileInputClass}
+                    />
+                  </div>
+                  <div className="sm:col-span-1">
+                    <label className="block text-xs text-slate-500 mb-1">
+                      Current location
+                    </label>
+                    <input name="delivery_item_location[]" className={inputClass} />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => setDeliveryItemRows([...deliveryItemRows, { key: nextKey() }])}
+              className="text-sm text-[var(--accent)] font-medium mt-2"
+            >
+              + Add item
+            </button>
+          </div>
         </section>
       )}
 
@@ -157,18 +236,65 @@ export default function RequestForm({ projects }: { projects: Project[] }) {
       {category === "maintenance" && (
         <section className="bg-white border border-slate-200 rounded-xl p-6 space-y-4">
           <h2 className="text-sm font-semibold text-slate-900">Maintenance details</h2>
-          <Field label="Location / area">
+          <Field label="Location / area" required>
             <input name="location_area" required className={inputClass} />
           </Field>
-          <Field label="Issue category">
-            <input name="issue_category" className={inputClass} />
+
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Type of maintenance" required>
+              <select name="maintenance_type" required className={inputClass} defaultValue="">
+                <option value="">Select...</option>
+                {MAINTENANCE_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Urgency">
+              <select name="urgency" defaultValue="medium" className={inputClass}>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Scheduled date">
+              <input type="date" name="maintenance_date" className={inputClass} />
+            </Field>
+            <Field label="Scheduled time">
+              <input type="time" name="maintenance_time" className={inputClass} />
+            </Field>
+          </div>
+
+          <Field label="Photos (up to 6)">
+            <input
+              type="file"
+              name="maintenance_photos"
+              accept="image/*"
+              multiple
+              className={fileInputClass}
+              onChange={(e) => {
+                if (e.target.files && e.target.files.length > 6) {
+                  setPhotoError("You can attach up to 6 photos — please reselect.");
+                  e.target.value = "";
+                } else {
+                  setPhotoError("");
+                }
+              }}
+            />
+            {photoError && <p className="text-xs text-red-600 mt-1">{photoError}</p>}
           </Field>
-          <Field label="Urgency">
-            <select name="urgency" defaultValue="medium" className={inputClass}>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-            </select>
+
+          <Field label="Work permit (optional)">
+            <input
+              type="file"
+              name="maintenance_work_permit"
+              accept="image/*,.pdf"
+              className={fileInputClass}
+            />
           </Field>
         </section>
       )}
@@ -244,10 +370,24 @@ export default function RequestForm({ projects }: { projects: Project[] }) {
 const inputClass =
   "w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]";
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+const fileInputClass =
+  "w-full text-sm text-slate-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200";
+
+function Field({
+  label,
+  children,
+  required,
+}: {
+  label: string;
+  children: React.ReactNode;
+  required?: boolean;
+}) {
   return (
     <div>
-      <label className="block text-sm font-medium text-slate-700 mb-1">{label}</label>
+      <label className="block text-sm font-medium text-slate-700 mb-1">
+        {label}
+        {required && <span className="text-red-500 ml-0.5">*</span>}
+      </label>
       {children}
     </div>
   );

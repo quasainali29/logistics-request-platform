@@ -1,14 +1,6 @@
-import { createClient } from "@/lib/supabase/server";
 import RequestForm from "./RequestForm";
 
-export default async function NewRequestPage() {
-  const supabase = await createClient();
-  const { data: projects } = await supabase
-    .from("projects")
-    .select("id, name")
-    .eq("status", "active")
-    .order("name");
-
+export default function NewRequestPage() {
   return (
     <div className="p-8">
       <div className="mb-6">
@@ -17,7 +9,7 @@ export default async function NewRequestPage() {
           Fill in the details below. The form adapts to the category you choose.
         </p>
       </div>
-      <RequestForm projects={projects ?? []} />
+      <RequestForm />
     </div>
   );
 }
