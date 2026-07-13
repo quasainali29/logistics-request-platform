@@ -5,6 +5,9 @@ import {
   statusColor,
   PRIORITY_COLORS,
   CATEGORY_LABELS,
+  PURCHASING_CATEGORIES,
+  NATURE_OF_WORK_OPTIONS,
+  LABOR_TYPES,
   type Priority,
   type Category,
   type WorkflowStage,
@@ -12,7 +15,15 @@ import {
   type DeliveryDetails,
   type DeliveryItem,
   type MaintenanceDetails,
+  type ProcurementDetails,
+  type ProcurementItem,
+  type LaborLine,
 } from "@/lib/types";
+
+function labelFor(options: readonly { value: string; label: string }[], value: string | null) {
+  if (!value) return "—";
+  return options.find((o) => o.value === value)?.label ?? value;
+}
 import { StatusButton, CommentBox } from "./actions-client";
 import { format, parseISO } from "date-fns";
 import { notFound } from "next/navigation";
@@ -63,7 +74,9 @@ export default async function RequestDetailPage({
   let deliveryDetails: DeliveryDetails | null = null;
   let deliveryItems: DeliveryItem[] = [];
   let maintenanceDetails: MaintenanceDetails | null = null;
-  let genericDetails: Record<string, unknown>[] | null = null;
+  let procurementDetails: ProcurementDetails | null = null;
+  let procurementItems: ProcurementItem[] = [];
+  let laborLines: LaborLine[] = [];
 
   if (request.category === "delivery") {
     const [{ data: dd }, { data: items }] = await Promise.all([
@@ -81,7 +94,7 @@ export default async function RequestDetailPage({
       .from("labor_personnel_lines")
       .select("*")
       .eq("request_id", id);
-    genericDetails = data;
+    laborLines = (data ?? []) as LaborLine[];
   } else if (request.category === "maintenance") {
     const { data } = await supabase
       .from("maintenance_details")
@@ -90,11 +103,16 @@ export default async function RequestDetailPage({
       .maybeSingle();
     maintenanceDetails = data as MaintenanceDetails | null;
   } else if (request.category === "procurement") {
-    const { data } = await supabase
-      .from("procurement_line_items")
-      .select("*")
-      .eq("request_id", id);
-    genericDetails = data;
+    const [{ data: pd }, { data: items }] = await Promise.all([
+      supabase.from("procurement_details").select("*").eq("request_id", id).maybeSingle(),
+      supabase
+        .from("procurement_line_items")
+        .select("*")
+        .eq("request_id", id)
+        .order("item_no", { ascending: true }),
+    ]);
+    procurementDetails = pd as ProcurementDetails | null;
+    procurementItems = (items ?? []) as ProcurementItem[];
   }
 
   const stageList = (stages ?? []) as WorkflowStage[];
@@ -330,14 +348,148 @@ export default async function RequestDetailPage({
             </section>
           )}
 
-          {genericDetails && genericDetails.length > 0 && (
+          {request.category === "labor" && (
+            <section className="bg-white border border-slate-200 rounded-xl p-5">
+              <h2 className="text-sm font-semibold text-slate-900 mb-3">Labor details</h2>
+              <dl className="space-y-2 text-sm mb-4">
+                <Row
+                  label="Date from"
+                  value={
+                    laborLines[0]?.date_from
+                      ? format(parseISO(laborLines[0].date_from), "MMM d, yyyy")
+                      : "—"
+                  }
+                />
+                <Row
+                  label="Date to"
+                  value={
+                    laborLines[0]?.date_to
+                      ? format(parseISO(laborLines[0].date_to), "MMM d, yyyy")
+                      : "—"
+                  }
+                />
+              </dl>
+
+              {laborLines.length > 0 && (
+                <div className="overflow-hidden border border-slate-200 rounded-lg">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+                      <tr>
+                        <th className="text-left px-3 py-2 font-medium">#</th>
+                        <th className="text-left px-3 py-2 font-medium">
+                          Type of requirement
+                        </th>
+                        <th className="text-left px-3 py-2 font-medium">Nature of work</th>
+                        <th className="text-left px-3 py-2 font-medium">Qty</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {laborLines.map((line, i) => (
+                        <tr key={line.id}>
+                          <td className="px-3 py-2 text-slate-500">{i + 1}</td>
+                          <td className="px-3 py-2 text-slate-900">
+                            {labelFor(LABOR_TYPES, line.personnel_type)}
+                          </td>
+                          <td className="px-3 py-2 text-slate-700">
+                            {labelFor(NATURE_OF_WORK_OPTIONS, line.nature_of_work)}
+                          </td>
+                          <td className="px-3 py-2 text-slate-700">{line.quantity}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          )}
+
+          {request.category === "procurement" && (
             <section className="bg-white border border-slate-200 rounded-xl p-5">
               <h2 className="text-sm font-semibold text-slate-900 mb-3">
-                {CATEGORY_LABELS[request.category as Category]} details
+                Procurement details
               </h2>
-              <pre className="text-xs text-slate-600 bg-slate-50 rounded-md p-3 overflow-x-auto">
-                {JSON.stringify(genericDetails, null, 2)}
-              </pre>
+              <dl className="space-y-2 text-sm mb-4">
+                <Row
+                  label="Purchasing category"
+                  value={
+                    procurementDetails?.purchasing_category === "other"
+                      ? procurementDetails?.purchasing_category_other || "Other"
+                      : labelFor(
+                          PURCHASING_CATEGORIES,
+                          procurementDetails?.purchasing_category ?? null
+                        )
+                  }
+                />
+                <Row label="Vendor" value={procurementDetails?.vendor ?? "—"} />
+                <Row
+                  label="Needed by"
+                  value={
+                    procurementDetails?.needed_by_date
+                      ? format(parseISO(procurementDetails.needed_by_date), "MMM d, yyyy")
+                      : "—"
+                  }
+                />
+              </dl>
+
+              {procurementItems.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-semibold text-slate-500 mb-2 uppercase">
+                    Items
+                  </h3>
+                  <div className="overflow-hidden border border-slate-200 rounded-lg">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+                        <tr>
+                          <th className="text-left px-3 py-2 font-medium">#</th>
+                          <th className="text-left px-3 py-2 font-medium">Item</th>
+                          <th className="text-left px-3 py-2 font-medium">Qty</th>
+                          <th className="text-left px-3 py-2 font-medium">Image</th>
+                          <th className="text-left px-3 py-2 font-medium">Purchasing link</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {procurementItems.map((it) => (
+                          <tr key={it.id}>
+                            <td className="px-3 py-2 text-slate-500">{it.item_no}</td>
+                            <td className="px-3 py-2 text-slate-900">
+                              {it.item_description}
+                            </td>
+                            <td className="px-3 py-2 text-slate-700">{it.quantity}</td>
+                            <td className="px-3 py-2">
+                              {it.image_url ? (
+                                <a href={it.image_url} target="_blank" rel="noreferrer">
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={it.image_url}
+                                    alt={it.item_description ?? "Item image"}
+                                    className="w-10 h-10 object-cover rounded"
+                                  />
+                                </a>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
+                            <td className="px-3 py-2">
+                              {it.purchasing_link ? (
+                                <a
+                                  href={it.purchasing_link}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-[var(--accent)] underline"
+                                >
+                                  Link
+                                </a>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </section>
           )}
 
