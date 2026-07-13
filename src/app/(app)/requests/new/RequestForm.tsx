@@ -2,7 +2,7 @@
 
 import { useState, useRef } from "react";
 import { createRequest } from "../actions";
-import { MAINTENANCE_TYPES, type Category } from "@/lib/types";
+import { MAINTENANCE_TYPES, PURCHASING_CATEGORIES, NATURE_OF_WORK_OPTIONS, LABOR_TYPES, type Category } from "@/lib/types";
 import { uploadAttachment, uploadAttachments } from "@/lib/uploadAttachment";
 
 interface DeliveryItemRow {
@@ -27,11 +27,12 @@ function isNextRedirectError(err: unknown): boolean {
 
 export default function RequestForm() {
   const [category, setCategory] = useState<Category | "">("");
-  const [laborRows, setLaborRows] = useState([{ type: "labor", qty: 1 }]);
-  const [procRows, setProcRows] = useState([{ desc: "", qty: 1, cost: "" }]);
+  const [laborRows, setLaborRows] = useState([{ key: nextKey() }]);
+  const [procItemRows, setProcItemRows] = useState([{ key: nextKey() }]);
   const [deliveryItemRows, setDeliveryItemRows] = useState<DeliveryItemRow[]>([
     { key: nextKey() },
   ]);
+  const [purchasingCategory, setPurchasingCategory] = useState("");
   const [photoError, setPhotoError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
@@ -79,6 +80,17 @@ export default function RequestForm() {
         );
         out.append(
           "delivery_item_image_urls_json",
+          JSON.stringify(images.map((r) => r?.url ?? null))
+        );
+      }
+
+      if (category === "procurement") {
+        const imageFiles = raw.getAll("proc_item_image[]") as File[];
+        const images = await Promise.all(
+          imageFiles.map((f) => uploadAttachment(f, "procurement/pending/items"))
+        );
+        out.append(
+          "proc_item_image_urls_json",
           JSON.stringify(images.map((r) => r?.url ?? null))
         );
       }
@@ -268,43 +280,59 @@ export default function RequestForm() {
               <input type="date" name="labor_date_to" className={inputClass} />
             </Field>
           </div>
-          <Field label="Nature of work">
-            <select name="nature_of_work" className={inputClass} defaultValue="">
-              <option value="">Select...</option>
-              <option value="loading_unloading">Loading / Unloading</option>
-              <option value="setup_installation">Setup / Installation</option>
-              <option value="removal_dismantling">Removal / Dismantling</option>
-            </select>
-          </Field>
 
           <div>
             <p className="text-sm font-medium text-slate-700 mb-2">Personnel needed</p>
-            {laborRows.map((row, i) => (
-              <div key={i} className="flex gap-2 mb-2">
-                <select
-                  name="labor_type[]"
-                  defaultValue={row.type}
-                  className={inputClass}
+            <div className="space-y-3">
+              {laborRows.map((row, i) => (
+                <div
+                  key={row.key}
+                  className="border border-slate-200 rounded-lg p-3 grid sm:grid-cols-4 gap-2 items-start"
                 >
-                  <option value="labor">Labor</option>
-                  <option value="welder">Welder</option>
-                  <option value="carpenter">Carpenter</option>
-                  <option value="rigger">Rigger</option>
-                  <option value="electrician">Electrician</option>
-                </select>
-                <input
-                  type="number"
-                  name="labor_qty[]"
-                  min={1}
-                  defaultValue={row.qty}
-                  className={`${inputClass} w-24`}
-                />
-              </div>
-            ))}
+                  <div className="sm:col-span-1">
+                    <label className="block text-xs text-slate-500 mb-1">Item no.</label>
+                    <div className="text-sm text-slate-500 px-1 py-2">{i + 1}</div>
+                  </div>
+                  <div className="sm:col-span-1">
+                    <label className="block text-xs text-slate-500 mb-1">
+                      Type of requirement
+                    </label>
+                    <select name="labor_type[]" defaultValue="labor" className={inputClass}>
+                      {LABOR_TYPES.map((t) => (
+                        <option key={t.value} value={t.value}>
+                          {t.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="sm:col-span-1">
+                    <label className="block text-xs text-slate-500 mb-1">Nature of work</label>
+                    <select name="labor_nature[]" defaultValue="" className={inputClass}>
+                      <option value="">Select...</option>
+                      {NATURE_OF_WORK_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="sm:col-span-1">
+                    <label className="block text-xs text-slate-500 mb-1">Qty</label>
+                    <input
+                      type="number"
+                      name="labor_qty[]"
+                      min={1}
+                      defaultValue={1}
+                      className={inputClass}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
             <button
               type="button"
-              onClick={() => setLaborRows([...laborRows, { type: "labor", qty: 1 }])}
-              className="text-sm text-[var(--accent)] font-medium"
+              onClick={() => setLaborRows([...laborRows, { key: nextKey() }])}
+              className="text-sm text-[var(--accent)] font-medium mt-2"
             >
               + Add role
             </button>
@@ -383,13 +411,18 @@ export default function RequestForm() {
           <h2 className="text-sm font-semibold text-slate-900">Procurement details</h2>
           <div className="grid grid-cols-2 gap-4">
             <Field label="Purchasing category">
-              <select name="purchasing_category" className={inputClass} defaultValue="">
+              <select
+                name="purchasing_category"
+                className={inputClass}
+                value={purchasingCategory}
+                onChange={(e) => setPurchasingCategory(e.target.value)}
+              >
                 <option value="">Select...</option>
-                <option value="tools">Tools</option>
-                <option value="it_equipment">IT Equipment</option>
-                <option value="av_equipment">AV Equipment</option>
-                <option value="electrical_equipment">Electrical Equipment</option>
-                <option value="other">Other</option>
+                {PURCHASING_CATEGORIES.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
               </select>
             </Field>
             <Field label="Vendor (optional)">
@@ -397,38 +430,74 @@ export default function RequestForm() {
             </Field>
           </div>
 
+          {purchasingCategory === "other" && (
+            <Field label="Please specify">
+              <input
+                name="purchasing_category_other"
+                placeholder="e.g. Office furniture"
+                className={inputClass}
+              />
+            </Field>
+          )}
+
+          <Field label="Needed by">
+            <input type="date" name="procurement_needed_by" className={inputClass} />
+          </Field>
+
           <div>
             <p className="text-sm font-medium text-slate-700 mb-2">Line items</p>
-            {procRows.map((row, i) => (
-              <div key={i} className="flex gap-2 mb-2">
-                <input
-                  name="proc_desc[]"
-                  placeholder="Description"
-                  className={`${inputClass} flex-1`}
-                />
-                <input
-                  type="number"
-                  name="proc_qty[]"
-                  min={1}
-                  defaultValue={row.qty}
-                  className={`${inputClass} w-20`}
-                  placeholder="Qty"
-                />
-                <input
-                  type="number"
-                  step="0.01"
-                  name="proc_cost[]"
-                  className={`${inputClass} w-28`}
-                  placeholder="Unit cost"
-                />
-              </div>
-            ))}
+            <div className="space-y-3">
+              {procItemRows.map((row, i) => (
+                <div
+                  key={row.key}
+                  className="border border-slate-200 rounded-lg p-3 grid sm:grid-cols-5 gap-2 items-start"
+                >
+                  <div className="sm:col-span-1">
+                    <label className="block text-xs text-slate-500 mb-1">Item no.</label>
+                    <div className="text-sm text-slate-500 px-1 py-2">{i + 1}</div>
+                  </div>
+                  <div className="sm:col-span-1">
+                    <label className="block text-xs text-slate-500 mb-1">Item name</label>
+                    <input name="proc_item_name[]" className={inputClass} />
+                  </div>
+                  <div className="sm:col-span-1">
+                    <label className="block text-xs text-slate-500 mb-1">Required qty</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      name="proc_item_qty[]"
+                      className={inputClass}
+                    />
+                  </div>
+                  <div className="sm:col-span-1">
+                    <label className="block text-xs text-slate-500 mb-1">
+                      Image reference
+                    </label>
+                    <input
+                      type="file"
+                      name="proc_item_image[]"
+                      accept="image/*"
+                      className={fileInputClass}
+                    />
+                  </div>
+                  <div className="sm:col-span-1">
+                    <label className="block text-xs text-slate-500 mb-1">
+                      Purchasing link
+                    </label>
+                    <input
+                      name="proc_item_link[]"
+                      placeholder="https://..."
+                      className={inputClass}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
             <button
               type="button"
-              onClick={() =>
-                setProcRows([...procRows, { desc: "", qty: 1, cost: "" }])
-              }
-              className="text-sm text-[var(--accent)] font-medium"
+              onClick={() => setProcItemRows([...procItemRows, { key: nextKey() }])}
+              className="text-sm text-[var(--accent)] font-medium mt-2"
             >
               + Add line item
             </button>
