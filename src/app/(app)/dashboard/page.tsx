@@ -14,10 +14,13 @@ export default async function DashboardPage() {
   const profile = await getProfile();
   const supabase = await createClient();
   const isStaff = !!profile.is_staff;
+  const isCoordinator = profile.role === "logistics_coordinator";
 
   let query = supabase
     .from("requests")
-    .select("*, requestor:profiles!requests_requestor_id_fkey(full_name)");
+    .select(
+      "*, requestor:profiles!requests_requestor_id_fkey(full_name), owner:profiles!requests_owner_id_fkey(full_name)"
+    );
 
   if (!isStaff) {
     query = query.eq("requestor_id", profile.id);
@@ -37,7 +40,9 @@ export default async function DashboardPage() {
     stageList.find((s) => s.category === category && s.key === statusKey)?.is_terminal ?? false;
 
   const open = all.filter((r) => !isTerminal(r.category, r.status));
-  const pendingApproval = all.filter((r) => r.status === "under_review");
+  const pendingApproval = all.filter(
+    (r) => r.status === "submitted" || r.status === "under_review"
+  );
   const overdue = all.filter(
     (r) =>
       r.date_required &&
@@ -64,9 +69,18 @@ export default async function DashboardPage() {
     )
     .slice(0, 6);
 
-  const needsAttention = isStaff
-    ? all.filter((r) => r.status === "under_review" || r.status === "returned_for_info").slice(0, 6)
+  const needsAttention = profile.is_manager
+    ? all
+        .filter(
+          (r) =>
+            r.status === "submitted" || r.status === "under_review" || r.status === "returned_for_info"
+        )
+        .slice(0, 6)
     : all.filter((r) => r.status === "returned_for_info").slice(0, 6);
+
+  const assignedToMe = isCoordinator
+    ? all.filter((r) => r.owner_id === profile.id && !isTerminal(r.category, r.status)).slice(0, 6)
+    : [];
 
   const metrics = [
     { label: "Open Requests", value: open.length },
@@ -104,10 +118,46 @@ export default async function DashboardPage() {
         ))}
       </div>
 
+      {isCoordinator && (
+        <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6">
+          <h2 className="text-sm font-semibold text-slate-900 mb-3">Assigned to me</h2>
+          {assignedToMe.length === 0 ? (
+            <p className="text-sm text-slate-400">No requests assigned to you right now.</p>
+          ) : (
+            <ul className="space-y-2">
+              {assignedToMe.map((r) => (
+                <li key={r.id}>
+                  <Link
+                    href={`/requests/${r.id}`}
+                    className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-slate-50 border border-transparent hover:border-slate-200 transition"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm text-slate-900 truncate">{r.title}</p>
+                      <p className="text-xs text-slate-500">
+                        {r.request_number} · {CATEGORY_LABELS[r.category as keyof typeof CATEGORY_LABELS]}
+                      </p>
+                    </div>
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${statusColor(
+                        r.category,
+                        r.status,
+                        stageList
+                      )}`}
+                    >
+                      {formatStatusLabel(r.category, r.status, stageList)}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
       <div className="grid md:grid-cols-2 gap-6">
         <div className="bg-white border border-slate-200 rounded-xl p-5">
           <h2 className="text-sm font-semibold text-slate-900 mb-3">
-            {isStaff ? "Needs Your Attention" : "Returned to You"}
+            {profile.is_manager ? "Needs Your Attention" : isStaff ? "Needs Attention" : "Returned to You"}
           </h2>
           {needsAttention.length === 0 ? (
             <p className="text-sm text-slate-400">Nothing here right now.</p>
