@@ -5,9 +5,6 @@ import {
   statusColor,
   PRIORITY_COLORS,
   CATEGORY_LABELS,
-  PURCHASING_CATEGORIES,
-  NATURE_OF_WORK_OPTIONS,
-  LABOR_TYPES,
   type Priority,
   type Category,
   type WorkflowStage,
@@ -15,16 +12,11 @@ import {
   type DeliveryDetails,
   type DeliveryItem,
   type MaintenanceDetails,
-  type ProcurementDetails,
-  type ProcurementItem,
-  type LaborLine,
+  type RequestCloseout,
+  type LaborCloseoutLine,
 } from "@/lib/types";
-
-function labelFor(options: readonly { value: string; label: string }[], value: string | null) {
-  if (!value) return "—";
-  return options.find((o) => o.value === value)?.label ?? value;
-}
-import { StatusButton, CommentBox } from "./actions-client";
+import { StatusButton, CommentBox, ApproveRejectControls } from "./actions-client";
+import { CloseoutForm } from "./CloseoutForm";
 import { format, parseISO } from "date-fns";
 import { notFound } from "next/navigation";
 
@@ -40,43 +32,85 @@ export default async function RequestDetailPage({
   const { data: request } = await supabase
     .from("requests")
     .select(
-      "*, requestor:profiles!requests_requestor_id_fkey(full_name, email), approver:profiles!requests_approved_by_fkey(full_name)"
+      "*, requestor:profiles!requests_requestor_id_fkey(full_name, email), approver:profiles!requests_approved_by_fkey(full_name), owner:profiles!requests_owner_id_fkey(full_name)"
     )
     .eq("id", id)
     .single();
 
   if (!request) notFound();
 
-  const [{ data: comments }, { data: history }, { data: stages }, { data: transitions }] =
-    await Promise.all([
-      supabase
-        .from("comments")
-        .select("*, author:profiles(full_name)")
-        .eq("request_id", id)
-        .order("posted_at", { ascending: true }),
-      supabase
-        .from("status_history")
-        .select("*, changed_by_profile:profiles(full_name)")
-        .eq("request_id", id)
-        .order("changed_at", { ascending: false }),
-      supabase
-        .from("workflow_stages")
-        .select("*")
-        .eq("category", request.category),
-      supabase
-        .from("workflow_transitions")
-        .select("*")
-        .eq("category", request.category)
-        .eq("from_key", request.status)
-        .order("sort_order", { ascending: true }),
-    ]);
+  const [
+    { data: comments },
+    { data: history },
+    { data: stages },
+    { data: transitions },
+    { data: closeout },
+    { data: laborCloseoutLines },
+  ] = await Promise.all([
+    supabase
+      .from("comments")
+      .select("*, author:profiles(full_name)")
+      .eq("request_id", id)
+      .order("posted_at", { ascending: true }),
+    supabase
+      .from("status_history")
+      .select("*, changed_by_profile:profiles(full_name)")
+      .eq("request_id", id)
+      .order("changed_at", { ascending: false }),
+    supabase
+      .from("workflow_stages")
+      .select("*")
+      .eq("category", request.category),
+    supabase
+      .from("workflow_transitions")
+      .select("*")
+      .eq("category", request.category)
+      .eq("from_key", request.status)
+      .order("sort_order", { ascending: true }),
+    supabase.from("request_closeouts").select("*").eq("request_id", id).maybeSingle(),
+    supabase.from("labor_closeout_lines").select("*").eq("request_id", id),
+  ]);
+
+  // Coordinators for the Approve → Assign dropdown, only fetched for
+  // managers viewing a request that's still waiting on the approval gate.
+  let coordinators: { id: string; full_name: string }[] = [];
+  if (profile.is_manager && request.status === "submitted") {
+    const { data: coords } = await supabase
+      .from("profiles")
+      .select("id, full_name")
+      .eq("role", "logistics_coordinator")
+      .eq("status", "active")
+      .order("full_name", { ascending: true });
+    coordinators = coords ?? [];
+  }
+
+  // Pre-populate the labor closeout cost table from the original request's
+  // personnel lines the first time the coordinator opens the closeout form.
+  let laborSeedLines: { personnel_type: string; quantity: number; cost_per_labor: number }[] = [];
+  if (request.category === "labor" && request.status === "completed") {
+    if (laborCloseoutLines && laborCloseoutLines.length > 0) {
+      laborSeedLines = (laborCloseoutLines as LaborCloseoutLine[]).map((l) => ({
+        personnel_type: l.personnel_type,
+        quantity: l.quantity,
+        cost_per_labor: l.cost_per_labor,
+      }));
+    } else {
+      const { data: originalLines } = await supabase
+        .from("labor_personnel_lines")
+        .select("personnel_type, quantity")
+        .eq("request_id", id);
+      laborSeedLines = (originalLines ?? []).map((l) => ({
+        personnel_type: l.personnel_type,
+        quantity: l.quantity,
+        cost_per_labor: 0,
+      }));
+    }
+  }
 
   let deliveryDetails: DeliveryDetails | null = null;
   let deliveryItems: DeliveryItem[] = [];
   let maintenanceDetails: MaintenanceDetails | null = null;
-  let procurementDetails: ProcurementDetails | null = null;
-  let procurementItems: ProcurementItem[] = [];
-  let laborLines: LaborLine[] = [];
+  let genericDetails: Record<string, unknown>[] | null = null;
 
   if (request.category === "delivery") {
     const [{ data: dd }, { data: items }] = await Promise.all([
@@ -94,7 +128,7 @@ export default async function RequestDetailPage({
       .from("labor_personnel_lines")
       .select("*")
       .eq("request_id", id);
-    laborLines = (data ?? []) as LaborLine[];
+    genericDetails = data;
   } else if (request.category === "maintenance") {
     const { data } = await supabase
       .from("maintenance_details")
@@ -103,16 +137,11 @@ export default async function RequestDetailPage({
       .maybeSingle();
     maintenanceDetails = data as MaintenanceDetails | null;
   } else if (request.category === "procurement") {
-    const [{ data: pd }, { data: items }] = await Promise.all([
-      supabase.from("procurement_details").select("*").eq("request_id", id).maybeSingle(),
-      supabase
-        .from("procurement_line_items")
-        .select("*")
-        .eq("request_id", id)
-        .order("item_no", { ascending: true }),
-    ]);
-    procurementDetails = pd as ProcurementDetails | null;
-    procurementItems = (items ?? []) as ProcurementItem[];
+    const { data } = await supabase
+      .from("procurement_line_items")
+      .select("*")
+      .eq("request_id", id);
+    genericDetails = data;
   }
 
   const stageList = (stages ?? []) as WorkflowStage[];
@@ -122,10 +151,19 @@ export default async function RequestDetailPage({
 
   // A transition shows up if the current user's role is explicitly allowed,
   // or they're a manager (managers can always act — same rule the server
-  // action enforces in requests/actions.ts).
-  const visibleTransitions = availableTransitions.filter(
-    (t) => profile.is_manager || t.allowed_roles.includes(profile.role)
-  );
+  // action enforces in requests/actions.ts). The generic "submitted ->
+  // under_review" hop is superseded by the Approve/Reject + assign flow
+  // below, and "completed -> closed" is superseded by the closeout form —
+  // both are filtered out here so the old buttons don't show alongside the
+  // new UI.
+  const visibleTransitions = availableTransitions.filter((t) => {
+    if (status === "submitted" && t.to_key === "under_review") return false;
+    if (status === "completed" && t.to_key === "closed") return false;
+    return profile.is_manager || t.allowed_roles.includes(profile.role);
+  });
+
+  const closeoutRow = closeout as RequestCloseout | null;
+  const canManageCloseout = profile.is_manager || profile.role === "logistics_coordinator";
 
   return (
     <div className="p-8 max-w-4xl">
@@ -159,6 +197,9 @@ export default async function RequestDetailPage({
 
       {/* Action bar — driven by the admin-configured workflow for this category */}
       <div className="flex flex-wrap gap-2 mb-8">
+        {status === "submitted" && profile.is_manager && (
+          <ApproveRejectControls requestId={id} coordinators={coordinators} />
+        )}
         {visibleTransitions.map((t) => (
           <StatusButton
             key={t.id}
@@ -172,6 +213,16 @@ export default async function RequestDetailPage({
           <StatusButton requestId={id} status="submitted" label="Resubmit" />
         )}
       </div>
+
+      {status === "completed" && canManageCloseout && (
+        <div className="mb-8">
+          <CloseoutForm
+            requestId={id}
+            category={request.category}
+            laborLines={request.category === "labor" ? laborSeedLines : undefined}
+          />
+        </div>
+      )}
 
       <div className="grid md:grid-cols-3 gap-6">
         <div className="md:col-span-2 space-y-6">
@@ -348,140 +399,80 @@ export default async function RequestDetailPage({
             </section>
           )}
 
-          {request.category === "labor" && (
+          {genericDetails && genericDetails.length > 0 && (
             <section className="bg-white border border-slate-200 rounded-xl p-5">
-              <h2 className="text-sm font-semibold text-slate-900 mb-3">Labor details</h2>
-              <dl className="space-y-2 text-sm mb-4">
-                <Row
-                  label="Date from"
-                  value={
-                    laborLines[0]?.date_from
-                      ? format(parseISO(laborLines[0].date_from), "MMM d, yyyy")
-                      : "—"
-                  }
-                />
-                <Row
-                  label="Date to"
-                  value={
-                    laborLines[0]?.date_to
-                      ? format(parseISO(laborLines[0].date_to), "MMM d, yyyy")
-                      : "—"
-                  }
-                />
-              </dl>
-
-              {laborLines.length > 0 && (
-                <div className="overflow-hidden border border-slate-200 rounded-lg">
-                  <table className="w-full text-sm">
-                    <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
-                      <tr>
-                        <th className="text-left px-3 py-2 font-medium">#</th>
-                        <th className="text-left px-3 py-2 font-medium">
-                          Type of requirement
-                        </th>
-                        <th className="text-left px-3 py-2 font-medium">Nature of work</th>
-                        <th className="text-left px-3 py-2 font-medium">Qty</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {laborLines.map((line, i) => (
-                        <tr key={line.id}>
-                          <td className="px-3 py-2 text-slate-500">{i + 1}</td>
-                          <td className="px-3 py-2 text-slate-900">
-                            {labelFor(LABOR_TYPES, line.personnel_type)}
-                          </td>
-                          <td className="px-3 py-2 text-slate-700">
-                            {labelFor(NATURE_OF_WORK_OPTIONS, line.nature_of_work)}
-                          </td>
-                          <td className="px-3 py-2 text-slate-700">{line.quantity}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+              <h2 className="text-sm font-semibold text-slate-900 mb-3">
+                {CATEGORY_LABELS[request.category as Category]} details
+              </h2>
+              <pre className="text-xs text-slate-600 bg-slate-50 rounded-md p-3 overflow-x-auto">
+                {JSON.stringify(genericDetails, null, 2)}
+              </pre>
             </section>
           )}
 
-          {request.category === "procurement" && (
+          {closeoutRow && (
             <section className="bg-white border border-slate-200 rounded-xl p-5">
               <h2 className="text-sm font-semibold text-slate-900 mb-3">
-                Procurement details
+                Closeout documents
               </h2>
               <dl className="space-y-2 text-sm mb-4">
-                <Row
-                  label="Purchasing category"
-                  value={
-                    procurementDetails?.purchasing_category === "other"
-                      ? procurementDetails?.purchasing_category_other || "Other"
-                      : labelFor(
-                          PURCHASING_CATEGORIES,
-                          procurementDetails?.purchasing_category ?? null
-                        )
-                  }
-                />
-                <Row label="Vendor" value={procurementDetails?.vendor ?? "—"} />
-                <Row
-                  label="Needed by"
-                  value={
-                    procurementDetails?.needed_by_date
-                      ? format(parseISO(procurementDetails.needed_by_date), "MMM d, yyyy")
-                      : "—"
-                  }
-                />
+                {closeoutRow.delivery_location && (
+                  <Row label="Delivery location" value={closeoutRow.delivery_location} />
+                )}
+                {typeof closeoutRow.total_value === "number" && (
+                  <Row
+                    label="Total procurement value"
+                    value={closeoutRow.total_value.toFixed(2)}
+                  />
+                )}
               </dl>
 
-              {procurementItems.length > 0 && (
-                <div>
+              <div className="flex flex-wrap gap-4">
+                {closeoutRow.delivery_note && (
+                  <FileLink label="Delivery note" file={closeoutRow.delivery_note} />
+                )}
+                {closeoutRow.labor_sheet && (
+                  <FileLink label="Labor sheet" file={closeoutRow.labor_sheet} />
+                )}
+                {closeoutRow.maintenance_form && (
+                  <FileLink label="Signed maintenance form" file={closeoutRow.maintenance_form} />
+                )}
+                {closeoutRow.invoice && <FileLink label="Invoice" file={closeoutRow.invoice} />}
+              </div>
+
+              {closeoutRow.maintenance_photos?.length > 0 && (
+                <PhotoGrid label="Maintenance photos" photos={closeoutRow.maintenance_photos} />
+              )}
+              {closeoutRow.procurement_photos?.length > 0 && (
+                <PhotoGrid label="Items procured" photos={closeoutRow.procurement_photos} />
+              )}
+
+              {request.category === "labor" &&
+                (laborCloseoutLines as LaborCloseoutLine[] | null)?.length ? (
+                <div className="mt-4">
                   <h3 className="text-xs font-semibold text-slate-500 mb-2 uppercase">
-                    Items
+                    Cost breakdown
                   </h3>
                   <div className="overflow-hidden border border-slate-200 rounded-lg">
                     <table className="w-full text-sm">
                       <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
                         <tr>
-                          <th className="text-left px-3 py-2 font-medium">#</th>
-                          <th className="text-left px-3 py-2 font-medium">Item</th>
-                          <th className="text-left px-3 py-2 font-medium">Qty</th>
-                          <th className="text-left px-3 py-2 font-medium">Image</th>
-                          <th className="text-left px-3 py-2 font-medium">Purchasing link</th>
+                          <th className="text-left px-3 py-2 font-medium">Type of Labor</th>
+                          <th className="text-left px-3 py-2 font-medium">Quantity</th>
+                          <th className="text-left px-3 py-2 font-medium">Cost/Labor</th>
+                          <th className="text-left px-3 py-2 font-medium">Total value</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {procurementItems.map((it) => (
-                          <tr key={it.id}>
-                            <td className="px-3 py-2 text-slate-500">{it.item_no}</td>
-                            <td className="px-3 py-2 text-slate-900">
-                              {it.item_description}
+                        {(laborCloseoutLines as LaborCloseoutLine[]).map((l) => (
+                          <tr key={l.id}>
+                            <td className="px-3 py-2 text-slate-900">{l.personnel_type}</td>
+                            <td className="px-3 py-2 text-slate-700">{l.quantity}</td>
+                            <td className="px-3 py-2 text-slate-700">
+                              {l.cost_per_labor.toFixed(2)}
                             </td>
-                            <td className="px-3 py-2 text-slate-700">{it.quantity}</td>
-                            <td className="px-3 py-2">
-                              {it.image_url ? (
-                                <a href={it.image_url} target="_blank" rel="noreferrer">
-                                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                                  <img
-                                    src={it.image_url}
-                                    alt={it.item_description ?? "Item image"}
-                                    className="w-10 h-10 object-cover rounded"
-                                  />
-                                </a>
-                              ) : (
-                                "—"
-                              )}
-                            </td>
-                            <td className="px-3 py-2">
-                              {it.purchasing_link ? (
-                                <a
-                                  href={it.purchasing_link}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="text-[var(--accent)] underline"
-                                >
-                                  Link
-                                </a>
-                              ) : (
-                                "—"
-                              )}
+                            <td className="px-3 py-2 text-slate-900 font-medium">
+                              {l.total_value.toFixed(2)}
                             </td>
                           </tr>
                         ))}
@@ -489,7 +480,7 @@ export default async function RequestDetailPage({
                     </table>
                   </div>
                 </div>
-              )}
+              ) : null}
             </section>
           )}
 
@@ -538,6 +529,7 @@ export default async function RequestDetailPage({
                 }
               />
               <Row label="Approved by" value={request.approver?.full_name ?? "—"} />
+              <Row label="Assigned to" value={request.owner?.full_name ?? "—"} />
             </dl>
           </section>
 
@@ -568,6 +560,50 @@ function Row({ label, value }: { label: string; value: string }) {
     <div className="flex justify-between">
       <dt className="text-slate-500">{label}</dt>
       <dd className="text-slate-900">{value}</dd>
+    </div>
+  );
+}
+
+function FileLink({ label, file }: { label: string; file: { name: string; url: string } }) {
+  return (
+    <div>
+      <h3 className="text-xs font-semibold text-slate-500 mb-1 uppercase">{label}</h3>
+      <a
+        href={file.url}
+        target="_blank"
+        rel="noreferrer"
+        className="text-sm text-[var(--accent)] underline"
+      >
+        {file.name}
+      </a>
+    </div>
+  );
+}
+
+function PhotoGrid({
+  label,
+  photos,
+}: {
+  label: string;
+  photos: { name: string; url: string }[];
+}) {
+  return (
+    <div className="mt-4">
+      <h3 className="text-xs font-semibold text-slate-500 mb-2 uppercase">{label}</h3>
+      <div className="flex flex-wrap gap-2">
+        {photos.map((p, i) => (
+          <a
+            key={i}
+            href={p.url}
+            target="_blank"
+            rel="noreferrer"
+            className="block w-20 h-20 rounded-md overflow-hidden border border-slate-200"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={p.url} alt={p.name} className="w-full h-full object-cover" />
+          </a>
+        ))}
+      </div>
     </div>
   );
 }
