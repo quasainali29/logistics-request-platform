@@ -12,7 +12,9 @@ export default async function RequestsPage() {
 
   let query = supabase
     .from("requests")
-    .select("*, requestor:profiles!requests_requestor_id_fkey(full_name)");
+    .select(
+      "*, requestor:profiles!requests_requestor_id_fkey(full_name), owner:profiles!requests_owner_id_fkey(full_name)"
+    );
 
   if (!isStaff) {
     query = query.eq("requestor_id", profile.id);

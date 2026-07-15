@@ -173,6 +173,11 @@ export default function RequestsTable({
                   >
                     {formatStatusLabel(r.category, r.status, stageList)}
                   </span>
+                  {r.owner?.full_name && (
+                    <p className="text-xs text-slate-500 mt-1">
+                      Assigned to {r.owner.full_name}
+                    </p>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-slate-600">
                   {r.date_required ? format(parseISO(r.date_required), "MMM d, yyyy") : "—"}

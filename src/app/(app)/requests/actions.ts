@@ -5,6 +5,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import type { AttachmentFile } from "@/lib/types";
+import { sendNotificationEmail } from "@/lib/email";
+
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
 const BUCKET = "request-attachments";
 
@@ -36,6 +39,15 @@ async function uploadMany(
 ): Promise<AttachmentFile[]> {
   const results = await Promise.all(files.map((f) => uploadOne(supabase, folder, f)));
   return results.filter((r): r is AttachmentFile => r !== null);
+}
+
+async function currentUserIsManager(supabase: SupabaseClient, userId: string) {
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("*, role_info:roles!profiles_role_fkey(is_manager)")
+    .eq("id", userId)
+    .single();
+  return !!(profile?.role_info as { is_manager: boolean } | null)?.is_manager;
 }
 
 export async function createRequest(formData: FormData) {
@@ -275,6 +287,262 @@ export async function updateRequestStatus(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ requestId, status }),
+    });
+  } catch {
+    // Email failures should never block the workflow action itself.
+  }
+
+  revalidatePath(`/requests/${requestId}`);
+  revalidatePath("/requests");
+  revalidatePath("/dashboard");
+}
+
+export async function approveAndAssignRequest(requestId: string, coordinatorId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const isManager = await currentUserIsManager(supabase, user.id);
+  if (!isManager) {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "Only managers can approve requests."
+      )}`
+    );
+  }
+
+  if (!coordinatorId) {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "Please select a coordinator to assign."
+      )}`
+    );
+  }
+
+  const [{ data: coordinator }, { data: request }] = await Promise.all([
+    supabase.from("profiles").select("full_name, email").eq("id", coordinatorId).single(),
+    supabase.from("requests").select("request_number, title").eq("id", requestId).single(),
+  ]);
+
+  const { error } = await supabase
+    .from("requests")
+    .update({
+      status: "under_process",
+      owner_id: coordinatorId,
+      approved_by: user.id,
+      approval_date: new Date().toISOString().slice(0, 10),
+    })
+    .eq("id", requestId);
+
+  if (error) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  if (coordinator?.email) {
+    await sendNotificationEmail({
+      to: coordinator.email,
+      subject: `You've been assigned: ${request?.request_number ?? "a request"}`,
+      html: `<p>Hi ${coordinator.full_name},</p><p>You've been assigned to handle request <strong>${
+        request?.request_number ?? ""
+      }</strong> — ${request?.title ?? ""}.</p><p><a href="${APP_URL}/requests/${requestId}">View request</a></p>`,
+    });
+  }
+
+  revalidatePath(`/requests/${requestId}`);
+  revalidatePath("/requests");
+  revalidatePath("/dashboard");
+}
+
+export async function rejectRequest(requestId: string, reason?: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const isManager = await currentUserIsManager(supabase, user.id);
+  if (!isManager) {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "Only managers can reject requests."
+      )}`
+    );
+  }
+
+  const { error } = await supabase
+    .from("requests")
+    .update({ status: "rejected" })
+    .eq("id", requestId);
+
+  if (error) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  if (reason && reason.trim()) {
+    await supabase.from("comments").insert({
+      request_id: requestId,
+      author_id: user.id,
+      comment: `Rejected: ${reason.trim()}`,
+    });
+  }
+
+  try {
+    await fetch(`${APP_URL}/api/notify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId, status: "rejected" }),
+    });
+  } catch {
+    // Email failures should never block the workflow action itself.
+  }
+
+  revalidatePath(`/requests/${requestId}`);
+  revalidatePath("/requests");
+  revalidatePath("/dashboard");
+}
+
+export async function closeRequestWithDocuments(requestId: string, formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { data: request } = await supabase
+    .from("requests")
+    .select("category, status")
+    .eq("id", requestId)
+    .single();
+
+  if (!request) {
+    redirect(`/requests/${requestId}?error=Request+not+found`);
+  }
+
+  const category = request.category as string;
+  const closeoutRow: Record<string, unknown> = { request_id: requestId, closed_by: user.id };
+
+  if (category === "delivery") {
+    const deliveryLocation = (formData.get("delivery_location") as string)?.trim();
+    const noteFile = formData.get("delivery_note") as File | null;
+    const note =
+      noteFile && noteFile.size > 0
+        ? await uploadOne(supabase, `closeout/${requestId}`, noteFile)
+        : null;
+
+    if (!deliveryLocation || !note) {
+      redirect(
+        `/requests/${requestId}?error=${encodeURIComponent(
+          "Delivery note and delivery location are required to close this request."
+        )}`
+      );
+    }
+
+    closeoutRow.delivery_note = note;
+    closeoutRow.delivery_location = deliveryLocation;
+  } else if (category === "labor") {
+    const sheetFile = formData.get("labor_sheet") as File | null;
+    const sheet =
+      sheetFile && sheetFile.size > 0
+        ? await uploadOne(supabase, `closeout/${requestId}`, sheetFile)
+        : null;
+
+    if (!sheet) {
+      redirect(
+        `/requests/${requestId}?error=${encodeURIComponent(
+          "A labor sheet is required to close this request."
+        )}`
+      );
+    }
+    closeoutRow.labor_sheet = sheet;
+
+    const types = formData.getAll("cost_type[]") as string[];
+    const qtys = formData.getAll("cost_qty[]") as string[];
+    const costs = formData.getAll("cost_rate[]") as string[];
+    const lines = types
+      .map((t, i) => ({
+        request_id: requestId,
+        personnel_type: (t || "").trim(),
+        quantity: parseInt(qtys[i] || "1", 10) || 1,
+        cost_per_labor: parseFloat(costs[i] || "0") || 0,
+      }))
+      .filter((l) => l.personnel_type);
+
+    await supabase.from("labor_closeout_lines").delete().eq("request_id", requestId);
+    if (lines.length > 0) {
+      await supabase.from("labor_closeout_lines").insert(lines);
+    }
+  } else if (category === "maintenance") {
+    const formFile = formData.get("maintenance_form") as File | null;
+    const signedForm =
+      formFile && formFile.size > 0
+        ? await uploadOne(supabase, `closeout/${requestId}`, formFile)
+        : null;
+    const photoFiles = (formData.getAll("maintenance_photos") as File[]).filter(
+      (f) => f && f.size > 0
+    );
+
+    if (!signedForm || photoFiles.length === 0) {
+      redirect(
+        `/requests/${requestId}?error=${encodeURIComponent(
+          "A signed maintenance form and at least one photo are required to close this request."
+        )}`
+      );
+    }
+
+    const photos = await uploadMany(supabase, `closeout/${requestId}`, photoFiles);
+    closeoutRow.maintenance_form = signedForm;
+    closeoutRow.maintenance_photos = photos;
+  } else if (category === "procurement") {
+    const invoiceFile = formData.get("invoice") as File | null;
+    const invoice =
+      invoiceFile && invoiceFile.size > 0
+        ? await uploadOne(supabase, `closeout/${requestId}`, invoiceFile)
+        : null;
+    const photoFiles = (formData.getAll("procurement_photos") as File[]).filter(
+      (f) => f && f.size > 0
+    );
+    const deliveryLocation = (formData.get("delivery_location") as string)?.trim();
+    const totalValueRaw = formData.get("total_value") as string;
+
+    if (!invoice || photoFiles.length === 0 || !deliveryLocation) {
+      redirect(
+        `/requests/${requestId}?error=${encodeURIComponent(
+          "An invoice, at least one item photo, and a delivery location are required to close this request."
+        )}`
+      );
+    }
+
+    const photos = await uploadMany(supabase, `closeout/${requestId}`, photoFiles);
+    closeoutRow.invoice = invoice;
+    closeoutRow.procurement_photos = photos;
+    closeoutRow.delivery_location = deliveryLocation;
+    closeoutRow.total_value = parseFloat(totalValueRaw || "0") || 0;
+  }
+
+  const { error: upsertError } = await supabase
+    .from("request_closeouts")
+    .upsert(closeoutRow, { onConflict: "request_id" });
+
+  if (upsertError) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent(upsertError.message)}`);
+  }
+
+  const { error } = await supabase
+    .from("requests")
+    .update({ status: "closed" })
+    .eq("id", requestId);
+
+  if (error) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  try {
+    await fetch(`${APP_URL}/api/notify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId, status: "closed" }),
     });
   } catch {
     // Email failures should never block the workflow action itself.
