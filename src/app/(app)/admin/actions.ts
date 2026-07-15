@@ -177,7 +177,7 @@ export async function inviteUser(formData: FormData) {
   const admin = createAdminClient();
   const { error } = await admin.auth.admin.inviteUserByEmail(email, {
     data: { full_name: fullName, role },
-    redirectTo: `${APP_URL}/set-password`,
+    redirectTo: `${APP_URL}/auth/callback?next=/set-password`,
   });
 
   if (error) {
