@@ -30,13 +30,16 @@ export async function updateSession(request: NextRequest) {
   const isAuthRoute =
     request.nextUrl.pathname.startsWith("/login") ||
     request.nextUrl.pathname.startsWith("/forgot-password");
-  // Invite links land here with the session token in the URL fragment, which
-  // the server never sees — only client-side JS can pick it up. So this
-  // route must be reachable without a server-visible session yet.
+  // /set-password is landed on right after /auth/callback exchanges the
+  // invite/reset link's one-time code for a session, so it must be reachable
+  // before middleware sees a user on this same request.
   const isSetPasswordRoute = request.nextUrl.pathname.startsWith("/set-password");
+  // /auth/callback exchanges Supabase's PKCE `?code=` param for a session —
+  // it runs with no session yet, so it must never be redirected to /login.
+  const isAuthCallbackRoute = request.nextUrl.pathname.startsWith("/auth/");
   const isPublicAsset = request.nextUrl.pathname.startsWith("/_next");
 
-  if (!user && !isAuthRoute && !isSetPasswordRoute && !isPublicAsset) {
+  if (!user && !isAuthRoute && !isSetPasswordRoute && !isAuthCallbackRoute && !isPublicAsset) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
