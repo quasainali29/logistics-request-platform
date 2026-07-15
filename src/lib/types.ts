@@ -98,6 +98,7 @@ export interface RequestRow {
   created_at: string;
   updated_at: string;
   requestor?: Profile;
+  owner?: Profile;
 }
 
 export interface AttachmentFile {
@@ -198,6 +199,33 @@ export interface LaborLine {
   nature_of_work: string | null;
 }
 
+// Closeout documents required before a request can move from Completed to
+// Closed. One row per request; only the fields relevant to that request's
+// category are ever populated.
+export interface RequestCloseout {
+  id: string;
+  request_id: string;
+  delivery_note: AttachmentFile | null;
+  delivery_location: string | null;
+  labor_sheet: AttachmentFile | null;
+  maintenance_form: AttachmentFile | null;
+  maintenance_photos: AttachmentFile[];
+  invoice: AttachmentFile | null;
+  procurement_photos: AttachmentFile[];
+  total_value: number | null;
+  closed_by: string | null;
+  closed_at: string;
+}
+
+export interface LaborCloseoutLine {
+  id: string;
+  request_id: string;
+  personnel_type: string;
+  quantity: number;
+  cost_per_labor: number;
+  total_value: number;
+}
+
 // Fallback labels for the 4 seeded roles, used only when a `roles` row isn't
 // available to look up (e.g. a stale client cache). Prefer passing the real
 // roles list into formatRoleLabel() wherever one is in scope.
@@ -224,6 +252,7 @@ export function formatRoleLabel(roleName: string, roles?: RoleRow[]): string {
 // stage list into formatStatusLabel()/statusColor() wherever one is in scope.
 export const STATUS_LABELS: Record<string, string> = {
   submitted: "Submitted",
+  under_process: "Under Process",
   under_review: "Under Review",
   returned_for_info: "Returned for Info",
   approved: "Approved",
@@ -238,6 +267,7 @@ export const STATUS_LABELS: Record<string, string> = {
 
 export const STATUS_COLORS: Record<string, string> = {
   submitted: "bg-slate-100 text-slate-700",
+  under_process: "bg-amber-100 text-amber-800",
   under_review: "bg-amber-100 text-amber-800",
   returned_for_info: "bg-orange-100 text-orange-800",
   approved: "bg-blue-100 text-blue-800",
