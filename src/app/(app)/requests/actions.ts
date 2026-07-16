@@ -402,9 +402,32 @@ export async function rejectRequest(requestId: string, reason?: string) {
     );
   }
 
+  const { data: request } = await supabase
+    .from("requests")
+    .select("category")
+    .eq("id", requestId)
+    .single();
+
+  // Maintenance requests use a rework loop instead of a terminal rejection:
+  // the request goes back to the requestor as "Returned for Info" with a
+  // mandatory reason, and resubmitting (same request number) puts it back
+  // in the approval queue. Every other category keeps the original
+  // terminal "rejected" status with an optional reason.
+  const isMaintenance = request?.category === "maintenance";
+
+  if (isMaintenance && (!reason || !reason.trim())) {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "A reason is required to return this request for info."
+      )}`
+    );
+  }
+
+  const newStatus = isMaintenance ? "returned_for_info" : "rejected";
+
   const { error } = await supabase
     .from("requests")
-    .update({ status: "rejected" })
+    .update({ status: newStatus })
     .eq("id", requestId);
 
   if (error) {
@@ -415,7 +438,7 @@ export async function rejectRequest(requestId: string, reason?: string) {
     await supabase.from("comments").insert({
       request_id: requestId,
       author_id: user.id,
-      comment: `Rejected: ${reason.trim()}`,
+      comment: `${isMaintenance ? "Returned for info" : "Rejected"}: ${reason.trim()}`,
     });
   }
 
@@ -423,7 +446,7 @@ export async function rejectRequest(requestId: string, reason?: string) {
     await fetch(`${APP_URL}/api/notify`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requestId, status: "rejected" }),
+      body: JSON.stringify({ requestId, status: newStatus }),
     });
   } catch {
     // Email failures should never block the workflow action itself.
