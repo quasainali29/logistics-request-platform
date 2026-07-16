@@ -198,7 +198,11 @@ export default async function RequestDetailPage({
       {/* Action bar — driven by the admin-configured workflow for this category */}
       <div className="flex flex-wrap gap-2 mb-8">
         {status === "submitted" && profile.is_manager && (
-          <ApproveRejectControls requestId={id} coordinators={coordinators} />
+          <ApproveRejectControls
+            requestId={id}
+            coordinators={coordinators}
+            category={request.category}
+          />
         )}
         {visibleTransitions.map((t) => (
           <StatusButton

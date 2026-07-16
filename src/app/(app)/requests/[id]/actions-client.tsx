@@ -41,18 +41,39 @@ export function StatusButton({
 export function ApproveRejectControls({
   requestId,
   coordinators,
+  category,
 }: {
   requestId: string;
   coordinators: { id: string; full_name: string }[];
+  category?: string;
 }) {
   const [pending, startTransition] = useTransition();
   const [showAssign, setShowAssign] = useState(false);
   const [coordinatorId, setCoordinatorId] = useState("");
+  const [showReject, setShowReject] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
 
-  function handleReject() {
+  // Maintenance requests require a reason before they can be returned to
+  // the requestor — enforced here via a mandatory popup instead of the
+  // optional native prompt() used for every other category.
+  const requiresReason = category === "maintenance";
+
+  function handleRejectClick() {
+    if (requiresReason) {
+      setShowReject(true);
+      return;
+    }
     const reason = prompt("Optional reason for rejecting this request:");
     startTransition(() => {
       rejectRequest(requestId, reason?.trim() || undefined);
+    });
+  }
+
+  function handleConfirmReject() {
+    if (requiresReason && !rejectReason.trim()) return;
+    startTransition(() => {
+      rejectRequest(requestId, rejectReason.trim() || undefined);
+      setShowReject(false);
     });
   }
 
@@ -77,11 +98,53 @@ export function ApproveRejectControls({
       <button
         type="button"
         disabled={pending}
-        onClick={handleReject}
+        onClick={handleRejectClick}
         className="rounded-md px-4 py-2 text-sm font-medium bg-red-600 text-white hover:opacity-90 transition disabled:opacity-50"
       >
         Reject
       </button>
+
+      {showReject && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 w-full max-w-sm">
+            <h3 className="text-sm font-semibold text-slate-900 mb-1">
+              Return for info
+            </h3>
+            <p className="text-xs text-slate-500 mb-3">
+              This request will be sent back to the requestor as &ldquo;Returned for
+              Info&rdquo;. A reason is required — the requestor can resubmit the same
+              request once it&rsquo;s addressed.
+            </p>
+            <textarea
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              rows={3}
+              placeholder="Reason for returning this request…"
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowReject(false);
+                  setRejectReason("");
+                }}
+                className="rounded-md px-4 py-2 text-sm font-medium bg-white border border-slate-300 text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={pending || !rejectReason.trim()}
+                onClick={handleConfirmReject}
+                className="rounded-md px-4 py-2 text-sm font-medium bg-red-600 text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {pending ? "Submitting…" : "Submit"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showAssign && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
