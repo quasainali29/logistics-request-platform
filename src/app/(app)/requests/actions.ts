@@ -357,13 +357,30 @@ export async function approveAndAssignRequest(requestId: string, coordinatorId: 
     supabase.from("requests").select("request_number, title").eq("id", requestId).single(),
   ]);
 
+  // Two sequential updates (rather than one combined update) so the
+  // "requests_log_status" trigger records both transitions distinctly in
+  // status_history — the request's history should show "Approved" as its
+  // own step before "Under Process" (displayed as "Team Assigned" for
+  // maintenance), matching the requested workflow instead of collapsing
+  // both into a single jump straight to Under Process.
+  const { error: approveError } = await supabase
+    .from("requests")
+    .update({
+      status: "approved",
+      approved_by: user.id,
+      approval_date: new Date().toISOString().slice(0, 10),
+    })
+    .eq("id", requestId);
+
+  if (approveError) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent(approveError.message)}`);
+  }
+
   const { error } = await supabase
     .from("requests")
     .update({
       status: "under_process",
       owner_id: coordinatorId,
-      approved_by: user.id,
-      approval_date: new Date().toISOString().slice(0, 10),
     })
     .eq("id", requestId);
 
