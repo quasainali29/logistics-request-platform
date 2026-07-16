@@ -15,10 +15,41 @@ export default function SetPasswordPage() {
 
   useEffect(() => {
     const supabase = createClient();
-    supabase.auth.getSession().then(({ data }) => {
+
+    async function establishSession() {
+      // Invite / magic-link emails deliver the session as a URL hash
+      // fragment (#access_token=...&refresh_token=...) rather than a
+      // query `code` — fragments never reach the server (that's why
+      // /auth/callback can't see them), and Supabase JS's automatic
+      // detectSessionInUrl parsing is async and can race with the
+      // getSession() call below. Parse it explicitly here first so we
+      // don't depend on that timing.
+      const hash = typeof window !== "undefined" ? window.location.hash : "";
+      if (hash && hash.includes("access_token")) {
+        const params = new URLSearchParams(hash.slice(1));
+        const access_token = params.get("access_token");
+        const refresh_token = params.get("refresh_token");
+        if (access_token && refresh_token) {
+          const { error: setErr } = await supabase.auth.setSession({
+            access_token,
+            refresh_token,
+          });
+          if (!setErr) {
+            // Strip the tokens out of the visible/sharable URL.
+            window.history.replaceState(null, "", window.location.pathname);
+            setHasSession(true);
+            setChecking(false);
+            return;
+          }
+        }
+      }
+
+      const { data } = await supabase.auth.getSession();
       setHasSession(!!data.session);
       setChecking(false);
-    });
+    }
+
+    establishSession();
   }, []);
 
   async function handleSubmit(e: React.FormEvent) {
