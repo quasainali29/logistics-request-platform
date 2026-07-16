@@ -15,6 +15,9 @@ function safeName(name: string) {
   return name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
 }
 
+// Used by closeRequestWithDocuments, which still submits raw Files (the
+// closeout forms are small — signed PDFs/photos at that stage — so they
+// haven't needed the client-side pre-upload treatment createRequest uses).
 async function uploadOne(
   supabase: SupabaseClient,
   folder: string,
@@ -39,6 +42,33 @@ async function uploadMany(
 ): Promise<AttachmentFile[]> {
   const results = await Promise.all(files.map((f) => uploadOne(supabase, folder, f)));
   return results.filter((r): r is AttachmentFile => r !== null);
+}
+
+// createRequest's attachments (photos, permits, item reference images) are
+// uploaded directly to Supabase Storage from the browser first (see
+// src/lib/uploadAttachment.ts) — that sidesteps Vercel's Server Action
+// body-size limit for real photo/PDF uploads. What arrives here for those
+// fields is a JSON-encoded array of already-uploaded {name, url} objects
+// (or a list of plain URL strings for per-item images), never a raw File.
+function parseAttachmentArray(formData: FormData, key: string): AttachmentFile[] {
+  const raw = formData.get(key) as string | null;
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as (AttachmentFile | null)[];
+    return parsed.filter((p): p is AttachmentFile => !!p && !!p.url);
+  } catch {
+    return [];
+  }
+}
+
+function parseUrlArray(formData: FormData, key: string): (string | null)[] {
+  const raw = formData.get(key) as string | null;
+  if (!raw) return [];
+  try {
+    return JSON.parse(raw) as (string | null)[];
+  } catch {
+    return [];
+  }
 }
 
 async function currentUserIsManager(supabase: SupabaseClient, userId: string) {
@@ -93,23 +123,20 @@ export async function createRequest(formData: FormData) {
   }
 
   if (category === "delivery") {
-    const permitFile = formData.get("delivery_permit") as File | null;
-    const permit = permitFile
-      ? await uploadOne(supabase, `delivery/${request.id}`, permitFile)
-      : null;
+    const permitFiles = parseAttachmentArray(formData, "delivery_permit_json");
 
     await supabase.from("delivery_details").insert({
       request_id: request.id,
       delivery_location: formData.get("delivery_location") as string,
       requested_date: (formData.get("delivery_requested_date") as string) || null,
       requested_time: (formData.get("delivery_requested_time") as string) || null,
-      files: permit ? [permit] : [],
+      files: permitFiles,
     });
 
     const names = formData.getAll("delivery_item_name[]") as string[];
     const qtys = formData.getAll("delivery_item_qty[]") as string[];
-    const images = formData.getAll("delivery_item_image[]") as File[];
     const locations = formData.getAll("delivery_item_location[]") as string[];
+    const imageUrls = parseUrlArray(formData, "delivery_item_image_urls_json");
 
     const itemRows = [];
     for (let i = 0; i < names.length; i++) {
@@ -118,14 +145,12 @@ export async function createRequest(formData: FormData) {
       const qtyRaw = qtys[i];
       if (!itemName && !location && !qtyRaw) continue; // skip fully-empty rows
 
-      const image = images[i] ? await uploadOne(supabase, `delivery/${request.id}/items`, images[i]) : null;
-
       itemRows.push({
         request_id: request.id,
         item_no: i + 1,
         item_name: itemName || `Item ${i + 1}`,
         required_quantity: parseFloat(qtyRaw || "0") || 0,
-        image_url: image?.url ?? null,
+        image_url: imageUrls[i] ?? null,
         current_location: location || null,
       });
     }
@@ -136,15 +161,8 @@ export async function createRequest(formData: FormData) {
   }
 
   if (category === "maintenance") {
-    const photoFiles = (formData.getAll("maintenance_photos") as File[])
-      .filter((f) => f && f.size > 0)
-      .slice(0, 6);
-    const photos = await uploadMany(supabase, `maintenance/${request.id}`, photoFiles);
-
-    const permitFile = formData.get("maintenance_work_permit") as File | null;
-    const permit = permitFile
-      ? await uploadOne(supabase, `maintenance/${request.id}`, permitFile)
-      : null;
+    const photos = parseAttachmentArray(formData, "maintenance_photos_json");
+    const workPermit = parseAttachmentArray(formData, "maintenance_work_permit_json");
 
     await supabase.from("maintenance_details").insert({
       request_id: request.id,
@@ -154,7 +172,7 @@ export async function createRequest(formData: FormData) {
       scheduled_date: (formData.get("maintenance_date") as string) || null,
       scheduled_time: (formData.get("maintenance_time") as string) || null,
       photos,
-      work_permit: permit ? [permit] : [],
+      work_permit: workPermit,
     });
   }
 
@@ -182,25 +200,38 @@ export async function createRequest(formData: FormData) {
   }
 
   if (category === "procurement") {
-    const descriptions = formData.getAll("proc_desc[]") as string[];
-    const quantities = formData.getAll("proc_qty[]") as string[];
-    const costs = formData.getAll("proc_cost[]") as string[];
-    const purchasingCategory = formData.get("purchasing_category") as string;
-    const vendor = formData.get("vendor") as string;
+    await supabase.from("procurement_details").insert({
+      request_id: request.id,
+      purchasing_category: (formData.get("purchasing_category") as string) || null,
+      purchasing_category_other: (formData.get("purchasing_category_other") as string) || null,
+      vendor: (formData.get("vendor") as string) || null,
+      needed_by_date: (formData.get("procurement_needed_by") as string) || null,
+    });
 
-    const rows = descriptions
-      .map((desc, i) => ({
+    const names = formData.getAll("proc_item_name[]") as string[];
+    const qtys = formData.getAll("proc_item_qty[]") as string[];
+    const links = formData.getAll("proc_item_link[]") as string[];
+    const imageUrls = parseUrlArray(formData, "proc_item_image_urls_json");
+
+    const itemRows = [];
+    for (let i = 0; i < names.length; i++) {
+      const itemName = (names[i] || "").trim();
+      const link = (links[i] || "").trim();
+      const qtyRaw = qtys[i];
+      if (!itemName && !link && !qtyRaw) continue; // skip fully-empty rows
+
+      itemRows.push({
         request_id: request.id,
-        item_description: desc,
-        quantity: parseInt(quantities[i] || "1", 10),
-        unit_cost: parseFloat(costs[i] || "0"),
-        purchasing_category: purchasingCategory || null,
-        vendor: vendor || null,
-      }))
-      .filter((r) => r.item_description);
+        item_no: i + 1,
+        item_description: itemName || `Item ${i + 1}`,
+        quantity: parseInt(qtyRaw || "1", 10) || 1,
+        image_url: imageUrls[i] ?? null,
+        purchasing_link: link || null,
+      });
+    }
 
-    if (rows.length > 0) {
-      await supabase.from("procurement_line_items").insert(rows);
+    if (itemRows.length > 0) {
+      await supabase.from("procurement_line_items").insert(itemRows);
     }
   }
 
