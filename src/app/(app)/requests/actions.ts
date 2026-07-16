@@ -239,6 +239,218 @@ export async function createRequest(formData: FormData) {
   redirect(`/requests/${request.id}`);
 }
 
+export async function updateRequest(requestId: string, formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { data: existing } = await supabase
+    .from("requests")
+    .select("requestor_id, status, category")
+    .eq("id", requestId)
+    .single();
+
+  if (!existing) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent("Request not found")}`);
+  }
+
+  // Only the original requestor can edit, and only while the request is
+  // sitting in "Returned for Info" — this is the rectify-and-resubmit path,
+  // not a general-purpose edit feature.
+  if (existing!.requestor_id !== user.id || existing!.status !== "returned_for_info") {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "This request can't be edited right now."
+      )}`
+    );
+  }
+
+  const category = existing!.category as string;
+  const project = (formData.get("project") as string)?.trim();
+
+  if (!project) {
+    redirect(`/requests/${requestId}/edit?error=${encodeURIComponent("Project is required")}`);
+  }
+
+  if (category === "delivery") {
+    const deliveryLocation = (formData.get("delivery_location") as string)?.trim();
+    if (!deliveryLocation) {
+      redirect(
+        `/requests/${requestId}/edit?error=${encodeURIComponent("Delivery location is required")}`
+      );
+    }
+  }
+
+  // Resubmitting: same request row/number, straight back into the
+  // approval queue (status -> submitted triggers the normal Approve/Reject
+  // flow again).
+  const { error } = await supabase
+    .from("requests")
+    .update({
+      title: formData.get("title") as string,
+      project,
+      department: (formData.get("department") as string) || null,
+      priority: (formData.get("priority") as string) || "medium",
+      date_required: (formData.get("date_required") as string) || null,
+      conclude_date: (formData.get("conclude_date") as string) || null,
+      description: (formData.get("description") as string) || null,
+      special_instructions: (formData.get("special_instructions") as string) || null,
+      status: "submitted",
+    })
+    .eq("id", requestId);
+
+  if (error) {
+    redirect(`/requests/${requestId}/edit?error=${encodeURIComponent(error.message)}`);
+  }
+
+  if (category === "delivery") {
+    const permitFiles = parseAttachmentArray(formData, "delivery_permit_json");
+    const existingPermit = parseAttachmentArray(formData, "delivery_permit_existing_json");
+
+    await supabase
+      .from("delivery_details")
+      .update({
+        delivery_location: formData.get("delivery_location") as string,
+        requested_date: (formData.get("delivery_requested_date") as string) || null,
+        requested_time: (formData.get("delivery_requested_time") as string) || null,
+        files: permitFiles.length > 0 ? permitFiles : existingPermit,
+      })
+      .eq("request_id", requestId);
+
+    const names = formData.getAll("delivery_item_name[]") as string[];
+    const qtys = formData.getAll("delivery_item_qty[]") as string[];
+    const locations = formData.getAll("delivery_item_location[]") as string[];
+    const imageUrls = parseUrlArray(formData, "delivery_item_image_urls_json");
+
+    const itemRows = [];
+    for (let i = 0; i < names.length; i++) {
+      const itemName = (names[i] || "").trim();
+      const location = (locations[i] || "").trim();
+      const qtyRaw = qtys[i];
+      if (!itemName && !location && !qtyRaw) continue;
+
+      itemRows.push({
+        request_id: requestId,
+        item_no: i + 1,
+        item_name: itemName || `Item ${i + 1}`,
+        required_quantity: parseFloat(qtyRaw || "0") || 0,
+        image_url: imageUrls[i] ?? null,
+        current_location: location || null,
+      });
+    }
+
+    await supabase.from("delivery_items").delete().eq("request_id", requestId);
+    if (itemRows.length > 0) {
+      await supabase.from("delivery_items").insert(itemRows);
+    }
+  }
+
+  if (category === "maintenance") {
+    const photos = parseAttachmentArray(formData, "maintenance_photos_json");
+    const workPermit = parseAttachmentArray(formData, "maintenance_work_permit_json");
+    const existingPhotos = parseAttachmentArray(formData, "maintenance_photos_existing_json");
+    const existingWorkPermit = parseAttachmentArray(
+      formData,
+      "maintenance_work_permit_existing_json"
+    );
+
+    await supabase
+      .from("maintenance_details")
+      .update({
+        location_area: formData.get("location_area") as string,
+        maintenance_type: (formData.get("maintenance_type") as string) || null,
+        urgency: (formData.get("urgency") as string) || "medium",
+        scheduled_date: (formData.get("maintenance_date") as string) || null,
+        scheduled_time: (formData.get("maintenance_time") as string) || null,
+        // Only replace attachments if the requester actually uploaded new
+        // ones — otherwise keep what was already on the request.
+        photos: photos.length > 0 ? photos : existingPhotos,
+        work_permit: workPermit.length > 0 ? workPermit : existingWorkPermit,
+      })
+      .eq("request_id", requestId);
+  }
+
+  if (category === "labor") {
+    const types = formData.getAll("labor_type[]") as string[];
+    const quantities = formData.getAll("labor_qty[]") as string[];
+    const dateFrom = formData.get("labor_date_from") as string;
+    const dateTo = formData.get("labor_date_to") as string;
+    const natureOfWork = formData.get("nature_of_work") as string;
+
+    const rows = types
+      .map((type, i) => ({
+        request_id: requestId,
+        personnel_type: type,
+        quantity: parseInt(quantities[i] || "1", 10),
+        date_from: dateFrom || null,
+        date_to: dateTo || null,
+        nature_of_work: natureOfWork || null,
+      }))
+      .filter((r) => r.personnel_type);
+
+    await supabase.from("labor_personnel_lines").delete().eq("request_id", requestId);
+    if (rows.length > 0) {
+      await supabase.from("labor_personnel_lines").insert(rows);
+    }
+  }
+
+  if (category === "procurement") {
+    await supabase
+      .from("procurement_details")
+      .update({
+        purchasing_category: (formData.get("purchasing_category") as string) || null,
+        purchasing_category_other: (formData.get("purchasing_category_other") as string) || null,
+        vendor: (formData.get("vendor") as string) || null,
+        needed_by_date: (formData.get("procurement_needed_by") as string) || null,
+      })
+      .eq("request_id", requestId);
+
+    const names = formData.getAll("proc_item_name[]") as string[];
+    const qtys = formData.getAll("proc_item_qty[]") as string[];
+    const links = formData.getAll("proc_item_link[]") as string[];
+    const imageUrls = parseUrlArray(formData, "proc_item_image_urls_json");
+
+    const itemRows = [];
+    for (let i = 0; i < names.length; i++) {
+      const itemName = (names[i] || "").trim();
+      const link = (links[i] || "").trim();
+      const qtyRaw = qtys[i];
+      if (!itemName && !link && !qtyRaw) continue;
+
+      itemRows.push({
+        request_id: requestId,
+        item_no: i + 1,
+        item_description: itemName || `Item ${i + 1}`,
+        quantity: parseInt(qtyRaw || "1", 10) || 1,
+        image_url: imageUrls[i] ?? null,
+        purchasing_link: link || null,
+      });
+    }
+
+    await supabase.from("procurement_line_items").delete().eq("request_id", requestId);
+    if (itemRows.length > 0) {
+      await supabase.from("procurement_line_items").insert(itemRows);
+    }
+  }
+
+  try {
+    await fetch(`${APP_URL}/api/notify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId, status: "submitted" }),
+    });
+  } catch {
+    // Email failures should never block the resubmit itself.
+  }
+
+  revalidatePath(`/requests/${requestId}`);
+  revalidatePath("/requests");
+  revalidatePath("/dashboard");
+  redirect(`/requests/${requestId}`);
+}
+
 export async function updateRequestStatus(
   requestId: string,
   status: string,
