@@ -342,7 +342,17 @@ export default function RequestForm() {
 
       {category === "maintenance" && (
         <section className="bg-white border border-slate-200 rounded-xl p-6 space-y-4">
-          <h2 className="text-sm font-semibold text-slate-900">Maintenance details</h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold text-slate-900">Maintenance details</h2>
+            <a
+              href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/request-attachments/templates/maintenance-request-template.xlsx`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs text-[var(--accent)] underline whitespace-nowrap"
+            >
+              Download sample template
+            </a>
+          </div>
           <Field label="Location / area" required>
             <input name="location_area" required className={inputClass} />
           </Field>
