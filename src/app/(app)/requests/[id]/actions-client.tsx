@@ -53,26 +53,16 @@ export function ApproveRejectControls({
   const [showReject, setShowReject] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
 
-  // Maintenance requests require a reason before they can be returned to
-  // the requestor — enforced here via a mandatory popup instead of the
-  // optional native prompt() used for every other category.
-  const requiresReason = category === "maintenance";
-
+  // Every category requires a reason before a request can be returned to
+  // the requestor — enforced here via a mandatory popup.
   function handleRejectClick() {
-    if (requiresReason) {
-      setShowReject(true);
-      return;
-    }
-    const reason = prompt("Optional reason for rejecting this request:");
-    startTransition(() => {
-      rejectRequest(requestId, reason?.trim() || undefined);
-    });
+    setShowReject(true);
   }
 
   function handleConfirmReject() {
-    if (requiresReason && !rejectReason.trim()) return;
+    if (!rejectReason.trim()) return;
     startTransition(() => {
-      rejectRequest(requestId, rejectReason.trim() || undefined);
+      rejectRequest(requestId, rejectReason.trim());
       setShowReject(false);
     });
   }
