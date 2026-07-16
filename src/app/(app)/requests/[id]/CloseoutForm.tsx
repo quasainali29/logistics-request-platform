@@ -67,7 +67,19 @@ export function CloseoutForm({
 
       {category === "delivery" && (
         <>
-          <Field label="Delivery note">
+          <Field
+            label="Delivery note"
+            action={
+              <a
+                href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/request-attachments/templates/delivery-note-template.xlsx`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-[var(--accent)] underline whitespace-nowrap normal-case"
+              >
+                Download sample template
+              </a>
+            }
+          >
             <input type="file" name="delivery_note" required className="text-sm" />
           </Field>
           <Field label="Delivery location">
@@ -228,12 +240,23 @@ export function CloseoutForm({
   );
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function Field({
+  label,
+  action,
+  children,
+}: {
+  label: string;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <div>
-      <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">
-        {label}
-      </label>
+      <div className="flex items-center justify-between gap-3 mb-1">
+        <label className="block text-xs font-semibold text-slate-500 uppercase">
+          {label}
+        </label>
+        {action}
+      </div>
       {children}
     </div>
   );
