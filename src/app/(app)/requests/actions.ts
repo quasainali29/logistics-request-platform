@@ -631,20 +631,11 @@ export async function rejectRequest(requestId: string, reason?: string) {
     );
   }
 
-  const { data: request } = await supabase
-    .from("requests")
-    .select("category")
-    .eq("id", requestId)
-    .single();
-
-  // Maintenance requests use a rework loop instead of a terminal rejection:
-  // the request goes back to the requestor as "Returned for Info" with a
+  // All categories use a rework loop instead of a terminal rejection: the
+  // request goes back to the requestor as "Returned for Info" with a
   // mandatory reason, and resubmitting (same request number) puts it back
-  // in the approval queue. Every other category keeps the original
-  // terminal "rejected" status with an optional reason.
-  const isMaintenance = request?.category === "maintenance";
-
-  if (isMaintenance && (!reason || !reason.trim())) {
+  // in the approval queue.
+  if (!reason || !reason.trim()) {
     redirect(
       `/requests/${requestId}?error=${encodeURIComponent(
         "A reason is required to return this request for info."
@@ -652,7 +643,7 @@ export async function rejectRequest(requestId: string, reason?: string) {
     );
   }
 
-  const newStatus = isMaintenance ? "returned_for_info" : "rejected";
+  const newStatus = "returned_for_info";
 
   const { error } = await supabase
     .from("requests")
@@ -667,7 +658,7 @@ export async function rejectRequest(requestId: string, reason?: string) {
     await supabase.from("comments").insert({
       request_id: requestId,
       author_id: user.id,
-      comment: `${isMaintenance ? "Returned for info" : "Rejected"}: ${reason.trim()}`,
+      comment: `Returned for info: ${reason.trim()}`,
     });
   }
 
