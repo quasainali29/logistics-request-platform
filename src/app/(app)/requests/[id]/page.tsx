@@ -19,6 +19,7 @@ import { StatusButton, CommentBox, ApproveRejectControls } from "./actions-clien
 import { CloseoutForm } from "./CloseoutForm";
 import { format, parseISO } from "date-fns";
 import { notFound } from "next/navigation";
+import Link from "next/link";
 
 export default async function RequestDetailPage({
   params,
@@ -214,7 +215,12 @@ export default async function RequestDetailPage({
           />
         ))}
         {isOwner && status === "returned_for_info" && (
-          <StatusButton requestId={id} status="submitted" label="Resubmit" />
+          <Link
+            href={`/requests/${id}/edit`}
+            className="rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 transition"
+          >
+            Edit &amp; Resubmit
+          </Link>
         )}
       </div>
 
