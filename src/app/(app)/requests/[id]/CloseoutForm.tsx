@@ -191,7 +191,19 @@ export function CloseoutForm({
 
       {category === "maintenance" && (
         <>
-          <Field label="Signed maintenance form">
+          <Field
+            label="Signed maintenance form"
+            action={
+              <a
+                href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/request-attachments/templates/maintenance-closeout-template.xlsx`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-[var(--accent)] underline whitespace-nowrap normal-case"
+              >
+                Download sample template
+              </a>
+            }
+          >
             <input type="file" name="maintenance_form" required className="text-sm" />
           </Field>
           <Field label="Photos of the maintenance">
