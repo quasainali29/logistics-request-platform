@@ -165,6 +165,13 @@ export default async function RequestDetailPage({
 
   const closeoutRow = closeout as RequestCloseout | null;
   const canManageCloseout = profile.is_manager || profile.role === "logistics_coordinator";
+  // Delivery notes are generated for whoever is actually fulfilling the
+  // delivery, not the original requester — available on any delivery
+  // request regardless of status, since it always reflects current data.
+  const canGenerateDeliveryNote =
+    profile.is_manager ||
+    profile.role === "logistics_coordinator" ||
+    profile.role === "warehouse_team";
 
   return (
     <div className="p-8 max-w-4xl">
@@ -324,7 +331,17 @@ export default async function RequestDetailPage({
 
           {request.category === "delivery" && deliveryDetails && (
             <section className="bg-white border border-slate-200 rounded-xl p-5">
-              <h2 className="text-sm font-semibold text-slate-900 mb-3">Delivery details</h2>
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <h2 className="text-sm font-semibold text-slate-900">Delivery details</h2>
+                {canGenerateDeliveryNote && (
+                  <a
+                    href={`/api/requests/${id}/delivery-note`}
+                    className="text-xs text-[var(--accent)] underline whitespace-nowrap"
+                  >
+                    Generate delivery note
+                  </a>
+                )}
+              </div>
               <dl className="space-y-2 text-sm mb-4">
                 <Row label="Delivery location" value={deliveryDetails.delivery_location ?? "—"} />
                 <Row
