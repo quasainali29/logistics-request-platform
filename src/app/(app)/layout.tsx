@@ -13,6 +13,7 @@ import {
   Settings,
   UserCircle,
   LogOut,
+  Wrench,
 } from "lucide-react";
 
 export default async function AppLayout({
@@ -39,6 +40,7 @@ export default async function AppLayout({
     { href: "/requests/new", label: "New Request", icon: PlusCircle, show: true },
     { href: "/warehouse", label: "Warehouse", icon: Warehouse, show: isStaff },
     { href: "/fleet", label: "Fleet", icon: Truck, show: isStaff },
+    { href: "/amc", label: "AMC Contracts", icon: Wrench, show: true },
     { href: "/reports", label: "Reports", icon: BarChart3, show: isStaff },
     { href: "/admin", label: "Admin", icon: Settings, show: isManager },
     { href: "/account", label: "My Account", icon: UserCircle, show: true },
