@@ -165,10 +165,11 @@ export default async function RequestDetailPage({
 
   const closeoutRow = closeout as RequestCloseout | null;
   const canManageCloseout = profile.is_manager || profile.role === "logistics_coordinator";
-  // Delivery notes are generated for whoever is actually fulfilling the
-  // delivery, not the original requester — available on any delivery
-  // request regardless of status, since it always reflects current data.
-  const canGenerateDeliveryNote =
+  // Delivery notes and maintenance reports are generated for whoever is
+  // actually fulfilling the request, not the original requester —
+  // available on any request regardless of status, since it always
+  // reflects current data.
+  const canGenerateFulfillmentDocs =
     profile.is_manager ||
     profile.role === "logistics_coordinator" ||
     profile.role === "warehouse_team";
@@ -262,9 +263,17 @@ export default async function RequestDetailPage({
 
           {request.category === "maintenance" && maintenanceDetails && (
             <section className="bg-white border border-slate-200 rounded-xl p-5">
-              <h2 className="text-sm font-semibold text-slate-900 mb-3">
-                Maintenance details
-              </h2>
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <h2 className="text-sm font-semibold text-slate-900">Maintenance details</h2>
+                {canGenerateFulfillmentDocs && (
+                  <a
+                    href={`/api/requests/${id}/maintenance-report`}
+                    className="text-xs text-[var(--accent)] underline whitespace-nowrap"
+                  >
+                    Generate maintenance form
+                  </a>
+                )}
+              </div>
               <dl className="space-y-2 text-sm mb-4">
                 <Row label="Location / area" value={maintenanceDetails.location_area ?? "—"} />
                 <Row
@@ -333,7 +342,7 @@ export default async function RequestDetailPage({
             <section className="bg-white border border-slate-200 rounded-xl p-5">
               <div className="flex items-center justify-between gap-3 mb-3">
                 <h2 className="text-sm font-semibold text-slate-900">Delivery details</h2>
-                {canGenerateDeliveryNote && (
+                {canGenerateFulfillmentDocs && (
                   <a
                     href={`/api/requests/${id}/delivery-note`}
                     className="text-xs text-[var(--accent)] underline whitespace-nowrap"
