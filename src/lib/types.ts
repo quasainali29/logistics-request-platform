@@ -316,3 +316,123 @@ export const CATEGORY_LABELS: Record<Category, string> = {
   maintenance: "Maintenance",
   procurement: "Procurement",
 };
+
+// ============================================================
+// AMC (Annual Maintenance Contracts)
+// ============================================================
+export interface AmcLocation {
+  id: string;
+  name: string;
+  created_at: string;
+}
+
+export interface AmcType {
+  id: string;
+  name: string;
+  requires_compliance: boolean;
+  created_at: string;
+}
+
+export interface AmcMaintenanceRecord {
+  id: string;
+  contract_id: string;
+  performed_date: string;
+  report_files: AttachmentFile[];
+  compliance_certificate_no: string | null;
+  compliance_authority: string | null;
+  compliance_valid_until: string | null;
+  notes: string | null;
+  uploaded_by: string | null;
+  uploader?: Profile;
+  created_at: string;
+}
+
+export interface AmcContract {
+  id: string;
+  location_id: string;
+  type_id: string;
+  supplier_name: string;
+  supplier_contact_name: string | null;
+  supplier_phone: string | null;
+  supplier_email: string | null;
+  frequency_months: number;
+  sla_response_hours: number | null;
+  payment_terms: string | null;
+  contract_value: number | null;
+  currency: string;
+  contract_start: string | null;
+  contract_end: string | null;
+  internal_owner_id: string | null;
+  last_maintenance_date: string | null;
+  next_maintenance_date: string;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  location?: AmcLocation;
+  type?: AmcType;
+  internal_owner?: Profile;
+}
+
+export type AmcDueStatus = "overdue" | "due_soon" | "upcoming";
+export type AmcContractStatus = "active" | "under_renewal" | "expired";
+
+export const FREQUENCY_LABELS: Record<number, string> = {
+  1: "Monthly",
+  2: "Every 2 months",
+  3: "Quarterly",
+  6: "Bi-annual",
+  12: "Annual",
+};
+
+export function frequencyLabel(months: number): string {
+  return FREQUENCY_LABELS[months] ?? `Every ${months} months`;
+}
+
+// Due-date status is derived, never stored — it's always accurate against
+// "today" without needing a background job to keep it in sync.
+export function amcDueStatus(nextMaintenanceDate: string, today: Date = new Date()): AmcDueStatus {
+  const next = new Date(nextMaintenanceDate);
+  const diffDays = Math.floor((next.getTime() - today.getTime()) / 86400000);
+  if (diffDays < 0) return "overdue";
+  if (diffDays <= 30) return "due_soon";
+  return "upcoming";
+}
+
+// Contract status is likewise derived from contract_end — "under renewal"
+// once within 60 days of expiry, "expired" once past it.
+export function amcContractStatus(
+  contractEnd: string | null,
+  today: Date = new Date()
+): AmcContractStatus {
+  if (!contractEnd) return "active";
+  const end = new Date(contractEnd);
+  const diffDays = Math.floor((end.getTime() - today.getTime()) / 86400000);
+  if (diffDays < 0) return "expired";
+  if (diffDays <= 60) return "under_renewal";
+  return "active";
+}
+
+export const AMC_DUE_STATUS_LABELS: Record<AmcDueStatus, string> = {
+  overdue: "Overdue",
+  due_soon: "Due soon",
+  upcoming: "Upcoming",
+};
+
+export const AMC_DUE_STATUS_COLORS: Record<AmcDueStatus, string> = {
+  overdue: "bg-red-100 text-red-700",
+  due_soon: "bg-amber-100 text-amber-800",
+  upcoming: "bg-emerald-100 text-emerald-800",
+};
+
+export const AMC_CONTRACT_STATUS_LABELS: Record<AmcContractStatus, string> = {
+  active: "Active",
+  under_renewal: "Under renewal",
+  expired: "Expired",
+};
+
+export const AMC_CONTRACT_STATUS_COLORS: Record<AmcContractStatus, string> = {
+  active: "bg-emerald-100 text-emerald-800",
+  under_renewal: "bg-amber-100 text-amber-800",
+  expired: "bg-red-100 text-red-700",
+};
