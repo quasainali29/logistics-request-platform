@@ -14,6 +14,16 @@ async function requireStaff() {
   return profile;
 }
 
+// Deleting a location or AMC type is manager-only — any staff member can
+// add one, but removing one is destructive if it's already in use.
+async function requireManager() {
+  const profile = await getProfile();
+  if (!profile.is_manager) {
+    throw new Error("Only managers can delete AMC locations or types.");
+  }
+  return profile;
+}
+
 export async function addAmcLocation(formData: FormData) {
   const profile = await requireStaff();
   const name = String(formData.get("name") ?? "").trim();
@@ -41,6 +51,48 @@ export async function addAmcType(formData: FormData) {
     .insert({ name, requires_compliance: requiresCompliance, created_by: profile.id });
   if (error && !error.message.includes("duplicate")) {
     throw new Error(`Failed to add AMC type: ${error.message}`);
+  }
+  revalidatePath("/amc");
+}
+
+export async function deleteAmcLocation(locationId: string) {
+  await requireManager();
+  const supabase = await createClient();
+
+  const { count } = await supabase
+    .from("amc_contracts")
+    .select("id", { count: "exact", head: true })
+    .eq("location_id", locationId);
+  if (count && count > 0) {
+    throw new Error(
+      "Can't delete a location that still has AMC contracts. Remove or reassign those contracts first."
+    );
+  }
+
+  const { error } = await supabase.from("amc_locations").delete().eq("id", locationId);
+  if (error) {
+    throw new Error(`Failed to delete location: ${error.message}`);
+  }
+  revalidatePath("/amc");
+}
+
+export async function deleteAmcType(typeId: string) {
+  await requireManager();
+  const supabase = await createClient();
+
+  const { count } = await supabase
+    .from("amc_contracts")
+    .select("id", { count: "exact", head: true })
+    .eq("type_id", typeId);
+  if (count && count > 0) {
+    throw new Error(
+      "Can't delete an AMC type that still has contracts. Remove or reassign those contracts first."
+    );
+  }
+
+  const { error } = await supabase.from("amc_types").delete().eq("id", typeId);
+  if (error) {
+    throw new Error(`Failed to delete AMC type: ${error.message}`);
   }
   revalidatePath("/amc");
 }

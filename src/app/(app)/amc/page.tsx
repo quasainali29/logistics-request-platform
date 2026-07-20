@@ -8,12 +8,14 @@ import {
   type AmcLocation,
   type AmcType,
 } from "@/lib/types";
-import { addAmcLocation, addAmcType } from "./actions";
+import { addAmcLocation, addAmcType, deleteAmcLocation, deleteAmcType } from "./actions";
+import { X } from "lucide-react";
 import AmcTable from "./AmcTable";
 
 export default async function AmcPage() {
   const profile = await getProfile();
   const isStaff = !!profile.is_staff;
+  const isManager = !!profile.is_manager;
   const supabase = await createClient();
 
   const [{ data: locations }, { data: types }, { data: contracts }] = await Promise.all([
@@ -76,9 +78,23 @@ export default async function AmcPage() {
             {locationList.map((loc) => (
               <span
                 key={loc.id}
-                className="bg-slate-100 text-slate-700 rounded-md px-3 py-1.5 text-xs"
+                className="relative group bg-slate-100 text-slate-700 rounded-md px-3 py-1.5 text-xs"
               >
                 {loc.name}
+                {isManager && (
+                  <form
+                    action={deleteAmcLocation.bind(null, loc.id)}
+                    className="absolute -top-1.5 -right-1.5 opacity-0 group-hover:opacity-100 transition"
+                  >
+                    <button
+                      type="submit"
+                      aria-label={`Delete ${loc.name}`}
+                      className="w-4 h-4 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center"
+                    >
+                      <X size={10} strokeWidth={2.5} />
+                    </button>
+                  </form>
+                )}
               </span>
             ))}
             {isStaff && (
@@ -114,9 +130,23 @@ export default async function AmcPage() {
             {typeList.map((t) => (
               <span
                 key={t.id}
-                className="bg-slate-100 text-slate-700 rounded-md px-3 py-1.5 text-xs"
+                className="relative group bg-slate-100 text-slate-700 rounded-md px-3 py-1.5 text-xs"
               >
                 {t.name}
+                {isManager && (
+                  <form
+                    action={deleteAmcType.bind(null, t.id)}
+                    className="absolute -top-1.5 -right-1.5 opacity-0 group-hover:opacity-100 transition"
+                  >
+                    <button
+                      type="submit"
+                      aria-label={`Delete ${t.name}`}
+                      className="w-4 h-4 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center"
+                    >
+                      <X size={10} strokeWidth={2.5} />
+                    </button>
+                  </form>
+                )}
               </span>
             ))}
             {isStaff && (
