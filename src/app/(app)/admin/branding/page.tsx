@@ -75,6 +75,49 @@ export default async function BrandingAdminPage({
             </div>
           </div>
 
+          <div className="border-t border-slate-100 pt-6">
+            <h3 className="text-xs font-semibold text-slate-700 mb-1">Login page look &amp; feel</h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Adjust the sign-in page's background color and logo size — no code changes needed.
+            </p>
+
+            <div className="grid sm:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">
+                  Background color
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="color"
+                    name="login_bg_color"
+                    defaultValue={appSettings?.login_bg_color ?? "#2563eb"}
+                    className="h-10 w-16 rounded border border-slate-300 cursor-pointer"
+                  />
+                  <span className="text-xs text-slate-500">
+                    Text automatically stays readable on any color.
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">
+                  Logo size
+                </label>
+                <select
+                  name="login_logo_size"
+                  defaultValue={String(appSettings?.login_logo_size ?? 80)}
+                  className="w-full max-w-[200px] rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                >
+                  <option value="48">Small (48px)</option>
+                  <option value="64">Medium (64px)</option>
+                  <option value="80">Large (80px)</option>
+                  <option value="96">Extra large (96px)</option>
+                  <option value="112">Huge (112px)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-2">Logo</label>
             {appSettings?.logo_url ? (
