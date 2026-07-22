@@ -5,8 +5,8 @@ import {
   statusColor,
   PRIORITY_COLORS,
   CATEGORY_LABELS,
-  type WorkflowStage,
 } from "@/lib/types";
+import { getWorkflowStages } from "@/lib/cachedLookups";
 import Link from "next/link";
 import { format, isPast, isToday, parseISO } from "date-fns";
 
@@ -16,23 +16,25 @@ export default async function DashboardPage() {
   const isStaff = !!profile.is_staff;
   const isCoordinator = profile.role === "logistics_coordinator";
 
+  // Only select the columns the dashboard actually renders. Requestor/owner
+  // names aren't shown anywhere on this page, so the joins that used to
+  // pull them in were pure wasted payload on every single dashboard load.
   let query = supabase
     .from("requests")
     .select(
-      "*, requestor:profiles!requests_requestor_id_fkey(full_name), owner:profiles!requests_owner_id_fkey(full_name)"
+      "id, request_number, title, category, status, priority, date_required, updated_at, owner_id, requestor_id"
     );
 
   if (!isStaff) {
     query = query.eq("requestor_id", profile.id);
   }
 
-  const [{ data: requests }, { data: stages }] = await Promise.all([
+  const [{ data: requests }, stageList] = await Promise.all([
     query.order("created_at", { ascending: false }),
-    supabase.from("workflow_stages").select("*"),
+    getWorkflowStages(),
   ]);
 
   const all = requests ?? [];
-  const stageList = (stages ?? []) as WorkflowStage[];
 
   // "Terminal" (no further action needed) is now admin-configured per
   // category/stage instead of a hardcoded status list.
