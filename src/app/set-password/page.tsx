@@ -1,11 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 export default function SetPasswordPage() {
+  return (
+    <Suspense fallback={null}>
+      <SetPasswordForm />
+    </Suspense>
+  );
+}
+
+function SetPasswordForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const forced = searchParams.get("forced") === "1";
   const [checking, setChecking] = useState(true);
   const [hasSession, setHasSession] = useState(false);
   const [password, setPassword] = useState("");
@@ -68,13 +78,23 @@ export default function SetPasswordPage() {
     setSubmitting(true);
     const supabase = createClient();
     const { error: updateError } = await supabase.auth.updateUser({ password });
-    setSubmitting(false);
 
     if (updateError) {
+      setSubmitting(false);
       setError(updateError.message);
       return;
     }
 
+    // Clear the forced-change flag if it was set (a no-op for the normal
+    // invite flow, where it was never true to begin with).
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (user) {
+      await supabase.from("profiles").update({ must_change_password: false }).eq("id", user.id);
+    }
+
+    setSubmitting(false);
     router.push("/dashboard");
     router.refresh();
   }
@@ -86,22 +106,30 @@ export default function SetPasswordPage() {
           <div className="mx-auto mb-3 h-10 w-10 rounded-lg bg-[var(--accent)] flex items-center justify-center text-white font-bold">
             L
           </div>
-          <h1 className="text-xl font-semibold text-slate-900">Set your password</h1>
+          <h1 className="text-xl font-semibold text-slate-900">
+            {forced ? "Choose a new password" : "Set your password"}
+          </h1>
           <p className="text-sm text-slate-500 mt-1">
-            You've been invited — choose a password to finish setting up your account.
+            {forced
+              ? "Your admin requires you to set a new password before continuing."
+              : "You've been invited — choose a password to finish setting up your account."}
           </p>
         </div>
 
         <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-6">
           {checking ? (
-            <p className="text-sm text-slate-500 text-center">Checking your invite link…</p>
+            <p className="text-sm text-slate-500 text-center">
+              {forced ? "Checking your session…" : "Checking your invite link…"}
+            </p>
           ) : !hasSession ? (
             <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
-              This link is invalid or has expired. Ask your admin to resend the invite, or{" "}
+              {forced
+                ? "Your session expired. Please "
+                : "This link is invalid or has expired. Ask your admin to resend the invite, or "}
               <a href="/login" className="underline font-medium">
                 sign in
-              </a>{" "}
-              if you already have a password.
+              </a>
+              {forced ? " again." : " if you already have a password."}
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
