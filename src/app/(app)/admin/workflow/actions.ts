@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 
 async function requireManager() {
   const supabase = await createClient();
@@ -63,6 +63,7 @@ export async function createStage(formData: FormData) {
   }
 
   revalidatePath("/admin/workflow");
+  updateTag("workflow-stages");
 }
 
 export async function updateStage(formData: FormData) {
@@ -86,6 +87,7 @@ export async function updateStage(formData: FormData) {
   }
 
   revalidatePath("/admin/workflow");
+  updateTag("workflow-stages");
 }
 
 export async function deleteStage(stageId: string, category: string) {
@@ -101,6 +103,7 @@ export async function deleteStage(stageId: string, category: string) {
   }
 
   revalidatePath("/admin/workflow");
+  updateTag("workflow-stages");
 }
 
 export async function createTransition(formData: FormData) {
