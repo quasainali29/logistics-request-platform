@@ -88,9 +88,24 @@ export async function createRequest(formData: FormData) {
   if (!user) redirect("/login");
 
   const category = formData.get("category") as string;
-  const project = (formData.get("project") as string)?.trim();
 
-  if (!project) {
+  // "Other" is a one-off free-text tag on this request only — it never
+  // gets added to the master Projects list (see admin/projects). Picking
+  // a real project instead links project_id, which is what powers
+  // per-project reporting.
+  const projectIdRaw = (formData.get("project_id") as string) || "";
+  const projectOther = (formData.get("project_other") as string)?.trim() || "";
+  let projectId: string | null = null;
+  let projectText: string | null = null;
+
+  if (projectIdRaw === "other") {
+    if (!projectOther) {
+      redirect(`/requests/new?error=${encodeURIComponent("Project name is required")}`);
+    }
+    projectText = projectOther;
+  } else if (projectIdRaw) {
+    projectId = projectIdRaw;
+  } else {
     redirect(`/requests/new?error=${encodeURIComponent("Project is required")}`);
   }
 
@@ -107,7 +122,8 @@ export async function createRequest(formData: FormData) {
       title: formData.get("title") as string,
       category,
       requestor_id: user.id,
-      project,
+      project_id: projectId,
+      project: projectText,
       department: (formData.get("department") as string) || null,
       priority: (formData.get("priority") as string) || "medium",
       date_required: (formData.get("date_required") as string) || null,
@@ -268,9 +284,20 @@ export async function updateRequest(requestId: string, formData: FormData) {
   }
 
   const category = existing!.category as string;
-  const project = (formData.get("project") as string)?.trim();
 
-  if (!project) {
+  const projectIdRaw = (formData.get("project_id") as string) || "";
+  const projectOther = (formData.get("project_other") as string)?.trim() || "";
+  let projectId: string | null = null;
+  let projectText: string | null = null;
+
+  if (projectIdRaw === "other") {
+    if (!projectOther) {
+      redirect(`/requests/${requestId}/edit?error=${encodeURIComponent("Project name is required")}`);
+    }
+    projectText = projectOther;
+  } else if (projectIdRaw) {
+    projectId = projectIdRaw;
+  } else {
     redirect(`/requests/${requestId}/edit?error=${encodeURIComponent("Project is required")}`);
   }
 
@@ -290,7 +317,8 @@ export async function updateRequest(requestId: string, formData: FormData) {
     .from("requests")
     .update({
       title: formData.get("title") as string,
-      project,
+      project_id: projectId,
+      project: projectText,
       department: (formData.get("department") as string) || null,
       priority: (formData.get("priority") as string) || "medium",
       date_required: (formData.get("date_required") as string) || null,
