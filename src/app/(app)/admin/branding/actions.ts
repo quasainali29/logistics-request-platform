@@ -23,6 +23,9 @@ export async function updateBranding(formData: FormData) {
 
   const orgName = (formData.get("org_name") as string)?.trim();
   const accentColor = (formData.get("accent_color") as string)?.trim();
+  const loginBgColor = (formData.get("login_bg_color") as string)?.trim();
+  const loginLogoSizeRaw = formData.get("login_logo_size") as string | null;
+  const loginLogoSize = loginLogoSizeRaw ? parseInt(loginLogoSizeRaw, 10) : undefined;
   const logoFile = formData.get("logo") as File | null;
   const removeLogo = formData.get("remove_logo") === "on";
 
@@ -32,6 +35,8 @@ export async function updateBranding(formData: FormData) {
   };
   if (orgName) updates.org_name = orgName;
   if (accentColor) updates.accent_color = accentColor;
+  if (loginBgColor) updates.login_bg_color = loginBgColor;
+  if (loginLogoSize && !Number.isNaN(loginLogoSize)) updates.login_logo_size = loginLogoSize;
 
   if (removeLogo) {
     updates.logo_url = null;
