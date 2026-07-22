@@ -5,10 +5,9 @@ import {
   amcContractStatus,
   amcDueStatus,
   type AmcContract,
-  type AmcLocation,
-  type AmcType,
 } from "@/lib/types";
 import { addAmcLocation, addAmcType, deleteAmcLocation, deleteAmcType } from "./actions";
+import { getAmcLocations, getAmcTypes } from "@/lib/cachedLookups";
 import { X } from "lucide-react";
 import AmcTable from "./AmcTable";
 
@@ -18,9 +17,9 @@ export default async function AmcPage() {
   const isManager = !!profile.is_manager;
   const supabase = await createClient();
 
-  const [{ data: locations }, { data: types }, { data: contracts }] = await Promise.all([
-    supabase.from("amc_locations").select("*").order("name"),
-    supabase.from("amc_types").select("*").order("name"),
+  const [locationList, typeList, { data: contracts }] = await Promise.all([
+    getAmcLocations(),
+    getAmcTypes(),
     supabase
       .from("amc_contracts")
       .select(
@@ -29,8 +28,6 @@ export default async function AmcPage() {
       .order("next_maintenance_date"),
   ]);
 
-  const locationList = (locations ?? []) as AmcLocation[];
-  const typeList = (types ?? []) as AmcType[];
   const contractList = (contracts ?? []) as AmcContract[];
 
   const overdueCount = contractList.filter(

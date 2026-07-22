@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 import { getProfile } from "@/lib/auth";
 import type { AttachmentFile } from "@/lib/types";
 
@@ -37,6 +37,7 @@ export async function addAmcLocation(formData: FormData) {
     throw new Error(`Failed to add location: ${error.message}`);
   }
   revalidatePath("/amc");
+  updateTag("amc-locations");
 }
 
 export async function addAmcType(formData: FormData) {
@@ -53,6 +54,7 @@ export async function addAmcType(formData: FormData) {
     throw new Error(`Failed to add AMC type: ${error.message}`);
   }
   revalidatePath("/amc");
+  updateTag("amc-types");
 }
 
 export async function deleteAmcLocation(locationId: string) {
@@ -74,6 +76,7 @@ export async function deleteAmcLocation(locationId: string) {
     throw new Error(`Failed to delete location: ${error.message}`);
   }
   revalidatePath("/amc");
+  updateTag("amc-locations");
 }
 
 export async function deleteAmcType(typeId: string) {
@@ -95,6 +98,7 @@ export async function deleteAmcType(typeId: string) {
     throw new Error(`Failed to delete AMC type: ${error.message}`);
   }
   revalidatePath("/amc");
+  updateTag("amc-types");
 }
 
 export async function createAmcContract(formData: FormData) {
