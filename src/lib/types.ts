@@ -58,6 +58,8 @@ export interface AppSettings {
   org_name: string;
   logo_url: string | null;
   accent_color: string;
+  login_bg_color: string;
+  login_logo_size: number;
   updated_at: string;
 }
 
