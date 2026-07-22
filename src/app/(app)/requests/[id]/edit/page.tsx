@@ -2,6 +2,7 @@ import { getProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { redirect, notFound } from "next/navigation";
 import RequestForm, { type RequestFormInitialData } from "../../new/RequestForm";
+import { getActiveProjects } from "@/lib/cachedLookups";
 import type { Category } from "@/lib/types";
 
 export default async function EditRequestPage({
@@ -39,10 +40,25 @@ export default async function EditRequestPage({
     c.comment?.startsWith("Returned for info:")
   );
 
+  // The request's linked project, fetched even if it's since been
+  // soft-deleted -- RequestForm needs to know that to render it as an
+  // "(unavailable)" option instead of silently dropping the selection.
+  let currentProject: { id: string; name: string; deleted_at: string | null } | null = null;
+  if (request.project_id) {
+    const { data: proj } = await supabase
+      .from("projects")
+      .select("id, name, deleted_at")
+      .eq("id", request.project_id)
+      .maybeSingle();
+    currentProject = proj ?? null;
+  }
+  const projects = await getActiveProjects();
+
   let initial: RequestFormInitialData = {
     title: request.title,
     priority: request.priority,
     project: request.project,
+    project_id: request.project_id,
     department: request.department,
     date_required: request.date_required,
     conclude_date: request.conclude_date,
@@ -151,6 +167,8 @@ export default async function EditRequestPage({
         requestId={id}
         category={request.category as Category}
         initial={initial}
+        projects={projects}
+        currentProject={currentProject}
       />
     </div>
   );
