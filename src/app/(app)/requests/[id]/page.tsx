@@ -15,6 +15,7 @@ import {
   type RequestCloseout,
   type LaborCloseoutLine,
 } from "@/lib/types";
+import { getWorkflowStages } from "@/lib/cachedLookups";
 import { StatusButton, CommentBox, ApproveRejectControls } from "./actions-client";
 import { CloseoutForm } from "./CloseoutForm";
 import { format, parseISO } from "date-fns";
@@ -43,7 +44,7 @@ export default async function RequestDetailPage({
   const [
     { data: comments },
     { data: history },
-    { data: stages },
+    allStages,
     { data: transitions },
     { data: closeout },
     { data: laborCloseoutLines },
@@ -58,10 +59,7 @@ export default async function RequestDetailPage({
       .select("*, changed_by_profile:profiles(full_name)")
       .eq("request_id", id)
       .order("changed_at", { ascending: false }),
-    supabase
-      .from("workflow_stages")
-      .select("*")
-      .eq("category", request.category),
+    getWorkflowStages(),
     supabase
       .from("workflow_transitions")
       .select("*")
@@ -71,6 +69,10 @@ export default async function RequestDetailPage({
     supabase.from("request_closeouts").select("*").eq("request_id", id).maybeSingle(),
     supabase.from("labor_closeout_lines").select("*").eq("request_id", id),
   ]);
+
+  // workflow_stages is cached across all categories; narrow to this
+  // request's category here instead of filtering it in the query itself.
+  const stages = allStages.filter((s) => s.category === request.category);
 
   // Coordinators for the Approve → Assign dropdown, only fetched for
   // managers viewing a request that's still waiting on the approval gate.
