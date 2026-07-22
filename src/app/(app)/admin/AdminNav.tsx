@@ -1,8 +1,13 @@
 import Link from "next/link";
 
-export function AdminNav({ active }: { active: "users" | "workflow" | "branding" }) {
+export function AdminNav({
+  active,
+}: {
+  active: "users" | "permissions" | "workflow" | "branding";
+}) {
   const tabs = [
     { key: "users", href: "/admin", label: "Users & Roles" },
+    { key: "permissions", href: "/admin/permissions", label: "Permissions" },
     { key: "workflow", href: "/admin/workflow", label: "Workflow" },
     { key: "branding", href: "/admin/branding", label: "Branding" },
   ] as const;

@@ -8,6 +8,7 @@ import {
   deactivateUser,
   reactivateUser,
   deleteUser,
+  setRolePermission,
 } from "./actions";
 import type { RoleRow } from "@/lib/types";
 
@@ -134,5 +135,32 @@ export function UserRowActions({
         Delete
       </button>
     </div>
+  );
+}
+
+// One checkbox in the Roles & Permissions matrix. Toggling it fires the
+// server action immediately (no separate save button) and greys out while
+// in flight, mirroring RoleAssignSelect's instant-toggle pattern.
+export function PermissionCheckbox({
+  roleName,
+  permissionKey,
+  granted,
+}: {
+  roleName: string;
+  permissionKey: string;
+  granted: boolean;
+}) {
+  const [pending, startTransition] = useTransition();
+
+  return (
+    <input
+      type="checkbox"
+      defaultChecked={granted}
+      disabled={pending}
+      onChange={(e) =>
+        startTransition(() => setRolePermission(roleName, permissionKey, e.target.checked))
+      }
+      className="h-4 w-4 rounded border-slate-300 text-[var(--accent)] focus:ring-[var(--accent)] disabled:opacity-50"
+    />
   );
 }

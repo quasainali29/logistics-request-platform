@@ -1,9 +1,10 @@
 import { getProfile } from "@/lib/auth";
+import { can } from "@/lib/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { format, parseISO } from "date-fns";
 import type { Profile, RoleRow, RoleRequestRow } from "@/lib/types";
-import { createRole, inviteUser } from "./actions";
+import { createRole, inviteUser, createUserDirectly } from "./actions";
 import {
   RoleAssignSelect,
   DeleteRoleButton,
@@ -18,7 +19,7 @@ export default async function AdminPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const profile = await getProfile();
-  if (!profile.is_manager) redirect("/dashboard");
+  if (!profile.is_manager && !can(profile, "access_admin_panel")) redirect("/dashboard");
 
   const { error } = await searchParams;
   const supabase = await createClient();
@@ -299,6 +300,84 @@ export default async function AdminPage({
                   className="bg-[var(--accent)] text-white rounded-md px-4 py-2 text-sm font-medium hover:opacity-90 transition"
                 >
                   Send Invite
+                </button>
+              </div>
+            </form>
+          </details>
+
+          <details className="group mt-3">
+            <summary className="text-sm font-medium text-[var(--accent)] cursor-pointer list-none flex items-center gap-1">
+              <span className="group-open:hidden">+ Create account directly (no email)</span>
+              <span className="hidden group-open:inline">Create account directly (no email)</span>
+            </summary>
+            <form
+              action={createUserDirectly}
+              className="mt-4 grid sm:grid-cols-3 gap-4 max-w-3xl"
+            >
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">
+                  Full name
+                </label>
+                <input
+                  name="full_name"
+                  required
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Email</label>
+                <input
+                  name="email"
+                  type="email"
+                  required
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Role</label>
+                <select
+                  name="role"
+                  defaultValue="requestor"
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                >
+                  {roleList.map((r) => (
+                    <option key={r.name} value={r.name}>
+                      {r.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Password</label>
+                <input
+                  name="password"
+                  type="password"
+                  required
+                  minLength={6}
+                  placeholder="At least 6 characters"
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                />
+              </div>
+              <div className="sm:col-span-2 flex items-end">
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    name="must_change_password"
+                    className="rounded border-slate-300"
+                  />
+                  Require password change on first login
+                </label>
+              </div>
+              <div className="sm:col-span-3">
+                <p className="text-xs text-slate-500 mb-2">
+                  The account is active immediately — no confirmation email is sent. Hand the
+                  email and password to the person directly.
+                </p>
+                <button
+                  type="submit"
+                  className="bg-[var(--accent)] text-white rounded-md px-4 py-2 text-sm font-medium hover:opacity-90 transition"
+                >
+                  Create Account
                 </button>
               </div>
             </form>

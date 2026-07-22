@@ -3,6 +3,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendNotificationEmail } from "@/lib/email";
+import { getProfile } from "@/lib/auth";
+import { can } from "@/lib/permissions";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
@@ -26,6 +28,18 @@ async function requireManager() {
   }
 
   return { supabase, user };
+}
+
+// Fine-grained check for the newer permission-gated actions below. Falls
+// back to redirecting home rather than throwing, matching requireManager's
+// behavior for actions invoked from a plain form/page.
+async function requirePermission(key: string) {
+  const profile = await getProfile();
+  if (!can(profile, key)) {
+    redirect("/admin?error=You+don't+have+permission+to+do+that");
+  }
+  const supabase = await createClient();
+  return { supabase, profile };
 }
 
 export async function createRole(formData: FormData) {
@@ -145,6 +159,66 @@ export async function decideRoleRequest(
 // User management
 // ============================================================
 
+// Creates an account that is immediately active with a real password —
+// no confirmation email, no invite link. The Supabase Auth user is created
+// already-confirmed (email_confirm: true), so the admin can hand the
+// email/password straight to the person and they can sign in right away.
+// The `handle_new_user` DB trigger auto-creates the matching `profiles` row
+// from the metadata we pass here, same as it does for invited users.
+export async function createUserDirectly(formData: FormData) {
+  const { supabase } = await requirePermission("manage_users");
+
+  const email = (formData.get("email") as string)?.trim().toLowerCase();
+  const fullName = (formData.get("full_name") as string)?.trim();
+  const password = (formData.get("password") as string) ?? "";
+  const role = (formData.get("role") as string) || "requestor";
+  // Admin-controlled per account, never mandatory — defaults to off unless
+  // the admin explicitly checks the box for this specific account.
+  const requirePasswordChange = formData.get("must_change_password") === "on";
+
+  if (!email || !fullName) {
+    redirect("/admin?error=Name+and+email+are+required");
+  }
+  if (password.length < 6) {
+    redirect("/admin?error=Password+must+be+at+least+6+characters");
+  }
+
+  const { data: existing } = await supabase
+    .from("profiles")
+    .select("id, full_name")
+    .eq("email", email)
+    .maybeSingle();
+
+  if (existing) {
+    redirect(
+      `/admin?error=${encodeURIComponent(
+        `${existing.full_name} (${email}) already has an account.`
+      )}`
+    );
+  }
+
+  const admin = createAdminClient();
+  const { data: created, error } = await admin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true, // no verification email — the account is active now
+    user_metadata: { full_name: fullName, role },
+  });
+
+  if (error || !created.user) {
+    redirect(`/admin?error=${encodeURIComponent(error?.message ?? "Couldn't create account")}`);
+  }
+
+  if (requirePasswordChange) {
+    await admin
+      .from("profiles")
+      .update({ must_change_password: true })
+      .eq("id", created.user.id);
+  }
+
+  revalidatePath("/admin");
+}
+
 export async function inviteUser(formData: FormData) {
   const { supabase } = await requireManager();
 
@@ -241,4 +315,74 @@ export async function deleteUser(userId: string) {
   }
 
   revalidatePath("/admin");
+}
+
+// ============================================================
+// Roles & Permissions matrix
+// ============================================================
+// Both of these write through the service-role client rather than the
+// per-request client: the RLS policies on permissions/role_permissions
+// still gate on the coarse is_manager() flag (see migration 008), but the
+// actual gate we want here is the fine-grained "manage_roles_permissions"
+// permission — so a manager could grant that permission to a non-manager
+// role and have it really work, instead of being silently blocked by RLS.
+// requirePermission() is the real authorization check in both cases.
+
+export async function setRolePermission(
+  roleName: string,
+  permissionKey: string,
+  granted: boolean
+) {
+  const { profile } = await requirePermission("manage_roles_permissions");
+
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from("role_permissions")
+    .update({ granted, updated_by: profile.id, updated_at: new Date().toISOString() })
+    .eq("role_name", roleName)
+    .eq("permission_key", permissionKey);
+
+  if (error) {
+    redirect(`/admin/permissions?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath("/admin/permissions");
+}
+
+// Fully open-ended: the admin can invent brand-new permission rows, not
+// just pick from a fixed list. The AFTER INSERT trigger on `permissions`
+// (migration 008) automatically seeds an unchecked cell for every existing
+// role, so the matrix never has a missing checkbox for it.
+export async function createPermission(formData: FormData) {
+  const { profile } = await requirePermission("manage_roles_permissions");
+
+  const label = (formData.get("label") as string)?.trim();
+  const category = (formData.get("category") as string)?.trim() || "Custom";
+  const rawKey = ((formData.get("key") as string) || label || "").trim();
+  const key = rawKey
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  if (!label || !key) {
+    redirect("/admin/permissions?error=A+label+is+required");
+  }
+
+  const admin = createAdminClient();
+  const { error } = await admin.from("permissions").insert({
+    key,
+    label,
+    category,
+    sort_order: 999,
+    created_by: profile.id,
+  });
+
+  if (error) {
+    const friendly = /duplicate key|already exists/i.test(error.message)
+      ? "A permission with that key already exists — try a different name."
+      : error.message;
+    redirect(`/admin/permissions?error=${encodeURIComponent(friendly)}`);
+  }
+
+  revalidatePath("/admin/permissions");
 }
