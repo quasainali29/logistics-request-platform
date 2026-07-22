@@ -1,4 +1,5 @@
 import { getProfile } from "@/lib/auth";
+import { can } from "@/lib/permissions";
 import { signOut } from "@/app/login/actions";
 import { createClient } from "@/lib/supabase/server";
 import { formatRoleLabel, type AppSettings } from "@/lib/types";
@@ -22,7 +23,10 @@ export default async function AppLayout({
   children: React.ReactNode;
 }) {
   const profile = await getProfile();
-  const isStaff = !!profile.is_staff;
+  // Nav visibility now reads through the fine-grained permission grid
+  // (Admin > Permissions) rather than the coarse is_staff/is_manager flags
+  // directly — for the roles seeded today the two agree, but a manager can
+  // now grant/revoke each of these independently per role.
   const isManager = !!profile.is_manager;
 
   const supabase = await createClient();
@@ -38,11 +42,11 @@ export default async function AppLayout({
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, show: true },
     { href: "/requests", label: "Requests", icon: ClipboardList, show: true },
     { href: "/requests/new", label: "New Request", icon: PlusCircle, show: true },
-    { href: "/warehouse", label: "Warehouse", icon: Warehouse, show: isStaff },
-    { href: "/fleet", label: "Fleet", icon: Truck, show: isStaff },
-    { href: "/amc", label: "AMC Contracts", icon: Wrench, show: true },
-    { href: "/reports", label: "Reports", icon: BarChart3, show: isStaff },
-    { href: "/admin", label: "Admin", icon: Settings, show: isManager },
+    { href: "/warehouse", label: "Warehouse", icon: Warehouse, show: can(profile, "view_warehouse") },
+    { href: "/fleet", label: "Fleet", icon: Truck, show: can(profile, "view_fleet") },
+    { href: "/amc", label: "AMC Contracts", icon: Wrench, show: can(profile, "view_amc") },
+    { href: "/reports", label: "Reports", icon: BarChart3, show: can(profile, "view_reports") },
+    { href: "/admin", label: "Admin", icon: Settings, show: can(profile, "access_admin_panel") || isManager },
     { href: "/account", label: "My Account", icon: UserCircle, show: true },
   ];
 
