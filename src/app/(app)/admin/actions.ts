@@ -33,9 +33,16 @@ async function requireManager() {
 // Fine-grained check for the newer permission-gated actions below. Falls
 // back to redirecting home rather than throwing, matching requireManager's
 // behavior for actions invoked from a plain form/page.
+//
+// is_manager is always an allowed override on top of the specific key —
+// managers could do everything in this panel before the permissions matrix
+// existed, and without this a manager whose role hasn't been explicitly
+// granted a given key (e.g. only "main_admin" has manage_roles_permissions
+// in the seed data) would otherwise be locked out of pages they can still
+// see (the page-level checks already allow is_manager through).
 async function requirePermission(key: string) {
   const profile = await getProfile();
-  if (!can(profile, key)) {
+  if (!profile.is_manager && !can(profile, key)) {
     redirect("/admin?error=You+don't+have+permission+to+do+that");
   }
   const supabase = await createClient();
