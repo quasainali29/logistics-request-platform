@@ -74,6 +74,15 @@ export interface Profile {
   // Populated by getProfile(); defaults to false if the role lookup fails.
   is_staff?: boolean;
   is_manager?: boolean;
+  // Granted permission keys for this profile's role, from role_permissions.
+  // Populated by getProfile(); empty array if the lookup fails. Use the
+  // `can()` helper in @/lib/permissions rather than checking this directly.
+  permissions: string[];
+  // Set per-account by an admin when creating it directly (see
+  // admin/actions.ts createUserDirectly). Never hardcoded/mandatory — off
+  // by default. When true, the next successful sign-in redirects to
+  // /set-password before the user can reach the rest of the app.
+  must_change_password?: boolean;
 }
 
 export interface RequestRow {

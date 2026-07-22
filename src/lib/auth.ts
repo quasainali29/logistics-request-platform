@@ -26,9 +26,19 @@ export async function getProfile(): Promise<Profile> {
     role_info: { is_staff: boolean; is_manager: boolean } | null;
   };
 
+  // Granted permission keys for this profile's role — the source of truth
+  // for the fine-grained checks in @/lib/permissions. is_staff/is_manager
+  // above remain in place as a coarser backstop used by RLS.
+  const { data: grants } = await supabase
+    .from("role_permissions")
+    .select("permission_key")
+    .eq("role_name", rest.role)
+    .eq("granted", true);
+
   return {
     ...rest,
     is_staff: role_info?.is_staff ?? false,
     is_manager: role_info?.is_manager ?? false,
+    permissions: (grants ?? []).map((g) => g.permission_key as string),
   };
 }
