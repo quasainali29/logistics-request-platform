@@ -2,7 +2,7 @@
 
 import { useState, useRef } from "react";
 import { createRequest, updateRequest } from "../actions";
-import { MAINTENANCE_TYPES, PURCHASING_CATEGORIES, NATURE_OF_WORK_OPTIONS, LABOR_TYPES, type Category } from "@/lib/types";
+import { MAINTENANCE_TYPES, PURCHASING_CATEGORIES, NATURE_OF_WORK_OPTIONS, LABOR_TYPES, type Category, type Project } from "@/lib/types";
 import { uploadAttachment, uploadAttachments } from "@/lib/uploadAttachment";
 
 type Attachment = { name: string; url: string };
@@ -33,7 +33,10 @@ interface LaborRow {
 export interface RequestFormInitialData {
   title: string;
   priority: string;
+  // Legacy free-text value, or the one-off "Other" tag -- only meaningful
+  // when project_id is null.
   project: string;
+  project_id?: string | null;
   department: string | null;
   date_required: string | null;
   conclude_date: string | null;
@@ -76,6 +79,12 @@ interface RequestFormProps {
   requestId?: string;
   category?: Category;
   initial?: RequestFormInitialData;
+  // Active projects for the dropdown.
+  projects?: Project[];
+  // The request's currently-linked project, even if it's been soft-deleted
+  // -- so editing an old request doesn't silently drop a since-removed
+  // project. Only relevant in edit mode.
+  currentProject?: { id: string; name: string; deleted_at: string | null } | null;
 }
 
 let rowKeyCounter = 0;
@@ -99,9 +108,14 @@ export default function RequestForm({
   requestId,
   category: initialCategory,
   initial,
+  projects = [],
+  currentProject = null,
 }: RequestFormProps) {
   const isEdit = mode === "edit";
   const [category, setCategory] = useState<Category | "">(initialCategory ?? "");
+  const [projectChoice, setProjectChoice] = useState<string>(
+    initial?.project_id ? initial.project_id : initial?.project ? "other" : ""
+  );
   const [laborRows, setLaborRows] = useState<LaborRow[]>(
     initial?.labor_lines?.length
       ? initial.labor_lines.map((l) => ({ key: nextKey(), ...l }))
@@ -266,13 +280,35 @@ export default function RequestForm({
 
         <div className="grid grid-cols-2 gap-4">
           <Field label="Project" required>
-            <input
-              name="project"
+            <select
+              name="project_id"
               required
-              placeholder="e.g. Downtown Warehouse Expansion"
-              defaultValue={initial?.project ?? ""}
+              value={projectChoice}
+              onChange={(e) => setProjectChoice(e.target.value)}
               className={inputClass}
-            />
+            >
+              <option value="" disabled>
+                Select...
+              </option>
+              {currentProject?.deleted_at && !projects.some((p) => p.id === currentProject.id) && (
+                <option value={currentProject.id}>{currentProject.name} (unavailable)</option>
+              )}
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+              <option value="other">Other</option>
+            </select>
+            {projectChoice === "other" && (
+              <input
+                name="project_other"
+                required
+                placeholder="Enter the project name"
+                defaultValue={initial?.project_id ? "" : initial?.project ?? ""}
+                className={`${inputClass} mt-2`}
+              />
+            )}
           </Field>
 
           <Field label="Department">

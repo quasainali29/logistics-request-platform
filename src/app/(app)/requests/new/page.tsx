@@ -1,6 +1,9 @@
 import RequestForm from "./RequestForm";
+import { getActiveProjects } from "@/lib/cachedLookups";
 
-export default function NewRequestPage() {
+export default async function NewRequestPage() {
+  const projects = await getActiveProjects();
+
   return (
     <div className="p-8">
       <div className="mb-6">
@@ -9,7 +12,7 @@ export default function NewRequestPage() {
           Fill in the details below. The form adapts to the category you choose.
         </p>
       </div>
-      <RequestForm />
+      <RequestForm projects={projects} />
     </div>
   );
 }
