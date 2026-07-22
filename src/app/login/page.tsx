@@ -21,7 +21,7 @@ export default async function LoginPage({
   const orgName = appSettings?.org_name ?? "Logistics Request Platform";
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4">
+    <div className="min-h-screen flex items-center justify-center px-4 bg-blue-600">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           {appSettings?.logo_url ? (
@@ -29,15 +29,15 @@ export default async function LoginPage({
             <img
               src={appSettings.logo_url}
               alt={orgName}
-              className="mx-auto mb-3 h-10 w-10 object-contain rounded-lg"
+              className="mx-auto mb-4 h-20 w-20 object-contain rounded-xl"
             />
           ) : (
-            <div className="mx-auto mb-3 h-10 w-10 rounded-lg bg-[var(--accent)] flex items-center justify-center text-white font-bold">
+            <div className="mx-auto mb-4 h-20 w-20 rounded-xl bg-[var(--accent)] flex items-center justify-center text-white font-bold text-3xl shadow-md">
               {orgName.charAt(0).toUpperCase()}
             </div>
           )}
-          <h1 className="text-xl font-semibold text-slate-900">{orgName}</h1>
-          <p className="text-sm text-slate-500 mt-1">
+          <h1 className="text-xl font-semibold text-white">{orgName}</h1>
+          <p className="text-sm text-blue-100 mt-1">
             {isSignup ? "Create your account" : "Sign in to continue"}
           </p>
         </div>
@@ -110,7 +110,7 @@ export default async function LoginPage({
           </form>
         </div>
 
-        <p className="text-center text-sm text-slate-500 mt-4">
+        <p className="text-center text-sm text-blue-100 mt-4">
           {isSignup ? (
             <>
               Already have an account?{" "}
