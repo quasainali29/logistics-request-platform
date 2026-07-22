@@ -2,6 +2,7 @@ import { unstable_cache } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { WorkflowStage } from "@/lib/types";
 import type { AmcLocation, AmcType } from "@/lib/types";
+import type { Project } from "@/lib/types";
 
 // These are near-static reference/lookup tables that get re-fetched on
 // almost every page load (dashboard, requests list, request detail, AMC
@@ -48,4 +49,22 @@ export const getAmcTypes = unstable_cache(
   },
   ["amc-types"],
   { tags: ["amc-types"], revalidate: 300 }
+);
+
+// Active (not soft-deleted) projects, for the request-form dropdown. Not
+// filtered by status (active/completed/on_hold) — a completed project can
+// still be a valid choice for a new request about it; deleted_at is the
+// only thing that removes it from the list.
+export const getActiveProjects = unstable_cache(
+  async (): Promise<Project[]> => {
+    const supabase = createAdminClient();
+    const { data } = await supabase
+      .from("projects")
+      .select("*")
+      .is("deleted_at", null)
+      .order("name");
+    return (data ?? []) as Project[];
+  },
+  ["active-projects"],
+  { tags: ["projects"], revalidate: 300 }
 );

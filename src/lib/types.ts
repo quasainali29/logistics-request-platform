@@ -85,6 +85,19 @@ export interface Profile {
   must_change_password?: boolean;
 }
 
+// The admin-managed master list a request can link to via project_id.
+// Soft-deleted (deleted_at set) projects are hidden from the request-form
+// dropdown but the row is kept so already-linked requests keep resolving --
+// the UI shows "Unavailable Project" for those instead of the real name.
+export interface Project {
+  id: string;
+  name: string;
+  client: string | null;
+  status: "active" | "completed" | "on_hold";
+  deleted_at: string | null;
+  created_at: string;
+}
+
 export interface RequestRow {
   id: string;
   request_number: string;
