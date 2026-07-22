@@ -1,25 +1,23 @@
 import { getProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import type { AmcLocation, AmcType } from "@/lib/types";
 import { createAmcContract } from "../actions";
+import { getAmcLocations, getAmcTypes } from "@/lib/cachedLookups";
 
 export default async function NewAmcPage() {
   const profile = await getProfile();
   if (!profile.is_staff) redirect("/amc");
 
   const supabase = await createClient();
-  const [{ data: locations }, { data: types }, { data: staffProfiles }] = await Promise.all([
-    supabase.from("amc_locations").select("*").order("name"),
-    supabase.from("amc_types").select("*").order("name"),
+  const [locationList, typeList, { data: staffProfiles }] = await Promise.all([
+    getAmcLocations(),
+    getAmcTypes(),
     supabase
       .from("profiles")
       .select("id, full_name, role_info:roles!profiles_role_fkey(is_staff)")
       .eq("status", "active"),
   ]);
 
-  const locationList = (locations ?? []) as AmcLocation[];
-  const typeList = (types ?? []) as AmcType[];
   const staffList = ((staffProfiles ?? []) as unknown as {
     id: string;
     full_name: string;
