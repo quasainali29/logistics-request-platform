@@ -1,6 +1,7 @@
 import { signIn, signUp } from "./actions";
 import { createClient } from "@/lib/supabase/server";
 import type { AppSettings } from "@/lib/types";
+import { getContrastTextColor } from "@/lib/utils";
 import Link from "next/link";
 
 export default async function LoginPage({
@@ -19,9 +20,16 @@ export default async function LoginPage({
     .single();
   const appSettings = settings as AppSettings | null;
   const orgName = appSettings?.org_name ?? "Logistics Request Platform";
+  const loginBgColor = appSettings?.login_bg_color ?? "#2563eb";
+  const logoSize = appSettings?.login_logo_size ?? 80;
+  const headingColor = getContrastTextColor(loginBgColor);
+  const subTextColor = headingColor === "#ffffff" ? "rgba(255,255,255,0.8)" : "rgba(15,23,42,0.65)";
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 bg-blue-600">
+    <div
+      className="min-h-screen flex items-center justify-center px-4"
+      style={{ backgroundColor: loginBgColor }}
+    >
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           {appSettings?.logo_url ? (
@@ -29,15 +37,21 @@ export default async function LoginPage({
             <img
               src={appSettings.logo_url}
               alt={orgName}
-              className="mx-auto mb-4 h-20 w-20 object-contain rounded-xl"
+              className="mx-auto mb-4 object-contain rounded-xl"
+              style={{ width: logoSize, height: logoSize }}
             />
           ) : (
-            <div className="mx-auto mb-4 h-20 w-20 rounded-xl bg-[var(--accent)] flex items-center justify-center text-white font-bold text-3xl shadow-md">
+            <div
+              className="mx-auto mb-4 rounded-xl bg-[var(--accent)] flex items-center justify-center text-white font-bold shadow-md"
+              style={{ width: logoSize, height: logoSize, fontSize: logoSize * 0.4 }}
+            >
               {orgName.charAt(0).toUpperCase()}
             </div>
           )}
-          <h1 className="text-xl font-semibold text-white">{orgName}</h1>
-          <p className="text-sm text-blue-100 mt-1">
+          <h1 className="text-xl font-semibold" style={{ color: headingColor }}>
+            {orgName}
+          </h1>
+          <p className="text-sm mt-1" style={{ color: subTextColor }}>
             {isSignup ? "Create your account" : "Sign in to continue"}
           </p>
         </div>
@@ -110,7 +124,7 @@ export default async function LoginPage({
           </form>
         </div>
 
-        <p className="text-center text-sm text-blue-100 mt-4">
+        <p className="text-center text-sm mt-4" style={{ color: subTextColor }}>
           {isSignup ? (
             <>
               Already have an account?{" "}
