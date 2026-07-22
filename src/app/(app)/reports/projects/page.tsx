@@ -4,6 +4,7 @@ import { getWorkflowStages } from "@/lib/cachedLookups";
 import type { Project, WorkflowStage } from "@/lib/types";
 import { ReportsNav } from "../ReportsNav";
 import { StatCard } from "../_components/StatCard";
+import { ProjectsChartToggle } from "../_components/ProjectsChartToggle";
 
 function isTerminal(stages: WorkflowStage[], category: string, status: string) {
   return stages.some((s) => s.category === category && s.key === status && s.is_terminal);
@@ -39,6 +40,10 @@ export default async function ProjectsReportPage() {
   const totalRequests = rows.length;
   const csvHref = `/api/reports/projects/csv`;
 
+  const chartLabels = projectList.map((p) => p.name);
+  const chartCompleted = projectList.map((p) => stats.get(p.id)?.done ?? 0);
+  const chartOpen = projectList.map((p) => stats.get(p.id)?.open ?? 0);
+
   return (
     <div className="p-8 max-w-5xl">
       <div className="mb-2">
@@ -64,6 +69,8 @@ export default async function ProjectsReportPage() {
           value={projectList.filter((p) => !p.deleted_at).length}
         />
       </div>
+
+      <ProjectsChartToggle labels={chartLabels} completed={chartCompleted} open={chartOpen} />
 
       <section className="bg-white border border-slate-200 rounded-xl p-5">
         <h2 className="text-sm font-semibold text-slate-900 mb-4">Requests per project</h2>
