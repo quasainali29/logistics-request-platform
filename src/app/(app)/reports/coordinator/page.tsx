@@ -3,9 +3,10 @@ import { requireReportPermission } from "@/lib/reportAuth";
 import { getWorkflowStages } from "@/lib/cachedLookups";
 import { parseDateRange } from "@/lib/reportDates";
 import type { WorkflowStage } from "@/lib/types";
-import { differenceInCalendarDays, parseISO } from "date-fns";
+import { differenceInCalendarDays, parseISO, format } from "date-fns";
 import { ReportsNav } from "../ReportsNav";
 import { StatCard } from "../_components/StatCard";
+import { ReportChart } from "../_components/ReportChart";
 
 function isTerminal(stages: WorkflowStage[], category: string, status: string) {
   return stages.some((s) => s.category === category && s.key === status && s.is_terminal);
@@ -69,6 +70,14 @@ export default async function CoordinatorReportPage({
 
   const csvHref = `/api/reports/coordinator/csv?from=${from}&to=${to}`;
 
+  const dayCount = differenceInCalendarDays(parseISO(to), parseISO(from)) + 1;
+  const dateCaption = `${format(parseISO(from), "MMM d")} – ${format(parseISO(to), "MMM d")}`;
+
+  const chartLabels = ownerRows.map((o) => o.name);
+  const openData = ownerRows.map((o) => o.open);
+  const doneData = ownerRows.map((o) => o.done);
+  const turnaroundData = ownerRows.map((o) => o.avgTurnaround ?? 0);
+
   return (
     <div className="p-8 max-w-5xl">
       <div className="mb-2">
@@ -112,7 +121,52 @@ export default async function CoordinatorReportPage({
 
       <div className="grid sm:grid-cols-2 gap-4 mb-6">
         <StatCard label="Coordinators/owners with requests" value={ownerRows.length} />
-        <StatCard label="Date range" value={`${from} → ${to}`} />
+        <StatCard label="Date range" value={`${dayCount} days`} caption={dateCaption} compact />
+      </div>
+
+      <div className="grid sm:grid-cols-2 gap-6 mb-6">
+        <section className="bg-white border border-slate-200 rounded-xl p-5">
+          <h2 className="text-sm font-semibold text-slate-900 mb-1">Open vs closed per coordinator</h2>
+          <div className="flex gap-4 text-xs text-slate-500 mb-3">
+            <span className="flex items-center gap-1">
+              <span className="w-2.5 h-2.5 rounded-sm bg-amber-500 inline-block" />
+              Open
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-2.5 h-2.5 rounded-sm bg-emerald-600 inline-block" />
+              Completed/Closed
+            </span>
+          </div>
+          {chartLabels.length === 0 ? (
+            <p className="text-sm text-slate-400">No requests in this range.</p>
+          ) : (
+            <ReportChart
+              type="bar"
+              labels={chartLabels}
+              datasets={[
+                { label: "Open", data: openData, color: "#d97706" },
+                { label: "Completed/Closed", data: doneData, color: "#059669" },
+              ]}
+              height={240}
+            />
+          )}
+        </section>
+
+        <section className="bg-white border border-slate-200 rounded-xl p-5">
+          <h2 className="text-sm font-semibold text-slate-900 mb-1">Avg turnaround time per coordinator</h2>
+          <p className="text-xs text-slate-500 mb-3">Days from request to completion</p>
+          {chartLabels.length === 0 ? (
+            <p className="text-sm text-slate-400">No requests in this range.</p>
+          ) : (
+            <ReportChart
+              type="bar"
+              indexAxis="y"
+              labels={chartLabels}
+              datasets={[{ label: "Avg turnaround (days)", data: turnaroundData, color: "#2563eb" }]}
+              height={240}
+            />
+          )}
+        </section>
       </div>
 
       <section className="bg-white border border-slate-200 rounded-xl p-5">
