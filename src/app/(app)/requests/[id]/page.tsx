@@ -34,12 +34,22 @@ export default async function RequestDetailPage({
   const { data: request } = await supabase
     .from("requests")
     .select(
-      "*, requestor:profiles!requests_requestor_id_fkey(full_name, email), approver:profiles!requests_approved_by_fkey(full_name), owner:profiles!requests_owner_id_fkey(full_name)"
+      "*, requestor:profiles!requests_requestor_id_fkey(full_name, email), approver:profiles!requests_approved_by_fkey(full_name), owner:profiles!requests_owner_id_fkey(full_name), linked_project:projects!requests_project_id_fkey(name, deleted_at)"
     )
     .eq("id", id)
     .single();
 
   if (!request) notFound();
+
+  // A soft-deleted project still resolves here (the FK link is untouched)
+  // -- we just swap the display label so it doesn't show a name that no
+  // longer exists in the admin's Projects list.
+  const linkedProject = request.linked_project as { name: string; deleted_at: string | null } | null;
+  const projectDisplay = linkedProject
+    ? linkedProject.deleted_at
+      ? "Unavailable Project"
+      : linkedProject.name
+    : request.project ?? "—";
 
   const [
     { data: comments },
@@ -548,7 +558,7 @@ export default async function RequestDetailPage({
           <section className="bg-white border border-slate-200 rounded-xl p-5">
             <h2 className="text-sm font-semibold text-slate-900 mb-3">Details</h2>
             <dl className="space-y-2 text-sm">
-              <Row label="Project" value={request.project ?? "—"} />
+              <Row label="Project" value={projectDisplay} />
               <Row label="Department" value={request.department ?? "—"} />
               <Row
                 label="Date required"
