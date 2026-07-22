@@ -10,13 +10,29 @@ export async function signIn(formData: FormData) {
   const email = formData.get("email") as string;
   const password = formData.get("password") as string;
 
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error) {
     redirect(`/login?error=${encodeURIComponent(error.message)}`);
   }
 
   revalidatePath("/", "layout");
+
+  // Admin-controlled, per-account flag (never mandatory/hardcoded) — set
+  // when an admin creates an account directly and opts this one account
+  // into a forced password change. See admin/actions.ts createUserDirectly.
+  if (data.user) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("must_change_password")
+      .eq("id", data.user.id)
+      .single();
+
+    if (profile?.must_change_password) {
+      redirect("/set-password?forced=1");
+    }
+  }
+
   redirect("/dashboard");
 }
 
