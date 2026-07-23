@@ -1,5 +1,5 @@
 import { getProfile } from "@/lib/auth";
-import { createClient } from "@/lib/supabase/server";
+import { getAppSettings } from "@/lib/cachedLookups";
 import { redirect } from "next/navigation";
 import type { AppSettings } from "@/lib/types";
 import { AdminNav } from "../AdminNav";
@@ -14,12 +14,7 @@ export default async function BrandingAdminPage({
   if (!profile.is_manager) redirect("/dashboard");
 
   const { error } = await searchParams;
-  const supabase = await createClient();
-  const { data: settings } = await supabase
-    .from("app_settings")
-    .select("*")
-    .eq("id", true)
-    .single();
+  const settings = await getAppSettings();
 
   const appSettings = settings as AppSettings | null;
 

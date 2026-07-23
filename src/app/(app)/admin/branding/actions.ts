@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 
 export async function updateBranding(formData: FormData) {
   const supabase = await createClient();
@@ -66,5 +66,6 @@ export async function updateBranding(formData: FormData) {
     redirect(`/admin/branding?error=${encodeURIComponent(error.message)}`);
   }
 
+  revalidateTag("app-settings", { expire: 0 });
   revalidatePath("/", "layout");
 }
