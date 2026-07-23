@@ -1,12 +1,11 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { createClient } from "@/lib/supabase/server";
+import { getAppSettings } from "@/lib/cachedLookups";
 import type { AppSettings } from "@/lib/types";
 
 async function getSettings(): Promise<AppSettings | null> {
   try {
-    const supabase = await createClient();
-    const { data } = await supabase.from("app_settings").select("*").eq("id", true).single();
+    const data = await getAppSettings();
     return data as AppSettings | null;
   } catch {
     // Falls back to defaults if the settings table isn't reachable yet
