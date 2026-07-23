@@ -1,7 +1,7 @@
 import { getProfile } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { signOut } from "@/app/login/actions";
-import { createClient } from "@/lib/supabase/server";
+import { getAppSettings } from "@/lib/cachedLookups";
 import { formatRoleLabel, type AppSettings } from "@/lib/types";
 import Link from "next/link";
 import {
@@ -29,12 +29,7 @@ export default async function AppLayout({
   // now grant/revoke each of these independently per role.
   const isManager = !!profile.is_manager;
 
-  const supabase = await createClient();
-  const { data: settings } = await supabase
-    .from("app_settings")
-    .select("*")
-    .eq("id", true)
-    .single();
+  const settings = await getAppSettings();
   const appSettings = settings as AppSettings | null;
   const orgName = appSettings?.org_name ?? "Logistics Platform";
 
