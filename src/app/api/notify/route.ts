@@ -28,6 +28,17 @@ export async function POST(req: NextRequest) {
 
   // Who gets notified for each transition, and what the email says.
   // Matches the Phase 2 notification map / Phase 5 automation catalog.
+  //
+  // Note: the initial "new request needs review" email (to logistics
+  // managers) and the "your request was submitted" confirmation (to the
+  // requestor) are sent directly from createRequest() in requests/actions.ts
+  // at creation time, not through this status-transition route — this route
+  // only fires on statuses a request can move *into* after that (approved,
+  // returned_for_info, dispatched, completed, closed). A stale "under_review"
+  // branch used to live here targeting logistics_coordinator, but no code
+  // path sets that status anymore (managers act directly on "submitted"
+  // requests via the Approve/Reject + assign flow), so it was dead code and
+  // has been removed.
   const notifyRequestorStatuses: RequestStatus[] = [
     "approved",
     "rejected",
@@ -36,24 +47,6 @@ export async function POST(req: NextRequest) {
     "completed",
     "closed",
   ];
-
-  if (status === "under_review") {
-    // New request needs staff attention — notify Logistics Coordinators.
-    const { data: coordinators } = await supabase
-      .from("profiles")
-      .select("email")
-      .eq("role", "logistics_coordinator")
-      .eq("status", "active");
-
-    const emails = (coordinators ?? []).map((c) => c.email).filter(Boolean);
-    if (emails.length > 0) {
-      await sendNotificationEmail({
-        to: emails,
-        subject: `New request needs review: ${request.title}`,
-        html: `<p><strong>${request.request_number} — ${request.title}</strong> was submitted by ${request.requestor?.full_name} and needs review.</p><p><a href="${link}">View request</a></p>`,
-      });
-    }
-  }
 
   if (notifyRequestorStatuses.includes(status) && request.requestor?.email) {
     await sendNotificationEmail({
