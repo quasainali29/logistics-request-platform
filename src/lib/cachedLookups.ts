@@ -68,3 +68,41 @@ export const getActiveProjects = unstable_cache(
   ["active-projects"],
   { tags: ["projects"], revalidate: 300 }
 );
+
+// app_settings (branding/org name/accent color/login page look) is a
+// single global row read on literally every page render (root layout for
+// metadata + <html> accent var, the (app) layout for the sidebar, and the
+// login page) — same rarely-changes-but-fetched-constantly profile as the
+// lookups above, so it gets the same treatment. Invalidated explicitly via
+// revalidateTag("app-settings") from updateBranding() in
+// admin/branding/actions.ts, with the same 5-minute fallback.
+export const getAppSettings = unstable_cache(
+  async () => {
+    const supabase = createAdminClient();
+    const { data } = await supabase.from("app_settings").select("*").eq("id", true).single();
+    return data;
+  },
+  ["app-settings"],
+  { tags: ["app-settings"], revalidate: 300 }
+);
+
+// The granted permission keys for a given role. getProfile() (see
+// @/lib/auth) used to run this as a fresh per-request query against the
+// per-user cookie-scoped client every single time — but the set of
+// permissions granted to e.g. "logistics_coordinator" is identical for
+// every user with that role and rarely changes, so it's cached per role
+// name here instead. Invalidated via revalidateTag("role-permissions")
+// from setRolePermission()/createPermission() in admin/actions.ts.
+export const getRolePermissionKeys = unstable_cache(
+  async (roleName: string): Promise<string[]> => {
+    const supabase = createAdminClient();
+    const { data } = await supabase
+      .from("role_permissions")
+      .select("permission_key")
+      .eq("role_name", roleName)
+      .eq("granted", true);
+    return (data ?? []).map((g) => g.permission_key as string);
+  },
+  ["role-permissions"],
+  { tags: ["role-permissions"], revalidate: 300 }
+);
