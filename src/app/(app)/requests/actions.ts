@@ -251,6 +251,39 @@ export async function createRequest(formData: FormData) {
     }
   }
 
+  // Best-effort notifications for the two audiences that care about a
+  // brand-new submission: the logistics managers who need to review/approve
+  // it, and the requestor who wants confirmation it went in. Never block
+  // request creation itself on an email failure.
+  try {
+    const [{ data: managers }, { data: requestorProfile }] = await Promise.all([
+      supabase.from("profiles").select("email").eq("role", "logistics_manager").eq("status", "active"),
+      supabase.from("profiles").select("full_name").eq("id", user.id).single(),
+    ]);
+
+    const managerEmails = (managers ?? []).map((m) => m.email).filter(Boolean);
+    const link = `${APP_URL}/requests/${request.id}`;
+    const requestorName = requestorProfile?.full_name ?? "A team member";
+
+    if (managerEmails.length > 0) {
+      await sendNotificationEmail({
+        to: managerEmails,
+        subject: `New request needs review: ${request.title}`,
+        html: `<p><strong>${request.request_number} — ${request.title}</strong> was submitted by ${requestorName} and needs your review.</p><p><a href="${link}">View request</a></p>`,
+      });
+    }
+
+    if (user.email) {
+      await sendNotificationEmail({
+        to: user.email,
+        subject: `${request.request_number} has been submitted`,
+        html: `<p>Your request <strong>${request.title}</strong> (${request.request_number}) has been submitted and is awaiting review.</p><p><a href="${link}">View request</a></p>`,
+      });
+    }
+  } catch (err) {
+    console.error("Failed to send request-creation notifications:", err);
+  }
+
   revalidatePath("/requests");
   redirect(`/requests/${request.id}`);
 }
@@ -457,7 +490,6 @@ export async function updateRequest(requestId: string, formData: FormData) {
       });
     }
 
-    await supabase.from("procurement_line_items").delete().eq("request_id", requestId);
     if (itemRows.length > 0) {
       await supabase.from("procurement_line_items").insert(itemRows);
     }
