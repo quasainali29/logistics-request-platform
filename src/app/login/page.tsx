@@ -1,5 +1,5 @@
 import { signIn, signUp } from "./actions";
-import { createClient } from "@/lib/supabase/server";
+import { getAppSettings } from "@/lib/cachedLookups";
 import type { AppSettings } from "@/lib/types";
 import { getContrastTextColor } from "@/lib/utils";
 import Link from "next/link";
@@ -12,12 +12,7 @@ export default async function LoginPage({
   const params = await searchParams;
   const isSignup = params.mode === "signup";
 
-  const supabase = await createClient();
-  const { data: settings } = await supabase
-    .from("app_settings")
-    .select("*")
-    .eq("id", true)
-    .single();
+  const settings = await getAppSettings();
   const appSettings = settings as AppSettings | null;
   const orgName = appSettings?.org_name ?? "Logistics Request Platform";
   const loginBgColor = appSettings?.login_bg_color ?? "#2563eb";
