@@ -5,7 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { sendNotificationEmail } from "@/lib/email";
 import { getProfile } from "@/lib/auth";
 import { can } from "@/lib/permissions";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
@@ -353,6 +353,7 @@ export async function setRolePermission(
     redirect(`/admin/permissions?error=${encodeURIComponent(error.message)}`);
   }
 
+  revalidateTag("role-permissions", { expire: 0 });
   revalidatePath("/admin/permissions");
 }
 
@@ -391,5 +392,6 @@ export async function createPermission(formData: FormData) {
     redirect(`/admin/permissions?error=${encodeURIComponent(friendly)}`);
   }
 
+  revalidateTag("role-permissions", { expire: 0 });
   revalidatePath("/admin/permissions");
 }
