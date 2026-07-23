@@ -39,13 +39,13 @@ export default async function AppLayout({
   const orgName = appSettings?.org_name ?? "Logistics Platform";
 
   const navItems = [
-    { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, show: true },
-    { href: "/requests", label: "Requests", icon: ClipboardList, show: true },
     { href: "/requests/new", label: "New Request", icon: PlusCircle, show: true },
-    { href: "/warehouse", label: "Warehouse", icon: Warehouse, show: can(profile, "view_warehouse") },
-    { href: "/fleet", label: "Fleet", icon: Truck, show: can(profile, "view_fleet") },
+    { href: "/requests", label: "Requests", icon: ClipboardList, show: true },
+    { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, show: true },
     { href: "/amc", label: "AMC Contracts", icon: Wrench, show: can(profile, "view_amc") },
     { href: "/reports", label: "Reports", icon: BarChart3, show: can(profile, "view_reports") },
+    { href: "/warehouse", label: "Warehouse", icon: Warehouse, show: can(profile, "view_warehouse") },
+    { href: "/fleet", label: "Fleet", icon: Truck, show: can(profile, "view_fleet") },
     { href: "/admin", label: "Admin", icon: Settings, show: can(profile, "access_admin_panel") || isManager },
     { href: "/account", label: "My Account", icon: UserCircle, show: true },
   ];
