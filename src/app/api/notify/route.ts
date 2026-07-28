@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendNotificationEmail } from "@/lib/email";
 import { STATUS_LABELS, type RequestStatus } from "@/lib/types";
+import { buildRequestEmailHtml, fetchCategoryDetails, resolveProjectName } from "@/lib/emailTemplates";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
@@ -49,10 +50,35 @@ export async function POST(req: NextRequest) {
   ];
 
   if (notifyRequestorStatuses.includes(status) && request.requestor?.email) {
+    // Category-specific fields and the resolved project name aren't part of
+    // the base `requests` row, so they're pulled in here — same helpers the
+    // creation and assignment emails use, keeping every notification for a
+    // request looking and reading the same way.
+    const [categoryDetails, projectName] = await Promise.all([
+      fetchCategoryDetails(supabase, request.category, requestId),
+      resolveProjectName(supabase, request.project, request.project_id),
+    ]);
+
     await sendNotificationEmail({
       to: request.requestor.email,
       subject: `${request.request_number} is now ${statusLabel}`,
-      html: `<p>Your request <strong>${request.title}</strong> (${request.request_number}) is now <strong>${statusLabel}</strong>.</p><p><a href="${link}">View request</a></p>`,
+      html: buildRequestEmailHtml({
+        requestNumber: request.request_number,
+        title: request.title,
+        category: request.category,
+        priority: request.priority,
+        status,
+        project: projectName,
+        department: request.department,
+        dateRequired: request.date_required,
+        concludeDate: request.conclude_date,
+        description: request.description,
+        specialInstructions: request.special_instructions,
+        categoryDetails,
+        headline: `Your request is now ${statusLabel}`,
+        ctaLabel: "View request",
+        ctaUrl: link,
+      }),
     });
   }
 
