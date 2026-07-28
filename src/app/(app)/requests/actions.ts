@@ -6,6 +6,14 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import type { AttachmentFile } from "@/lib/types";
 import { sendNotificationEmail } from "@/lib/email";
+import {
+  buildRequestEmailHtml,
+  escapeHtml,
+  fetchCategoryDetails,
+  formatEmailDate,
+  resolveProjectName,
+  type EmailDetailRow,
+} from "@/lib/emailTemplates";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
@@ -88,6 +96,12 @@ export async function createRequest(formData: FormData) {
   if (!user) redirect("/login");
 
   const category = formData.get("category") as string;
+
+  // Rows describing category-specific fields worth surfacing on the
+  // "new request" notification emails — populated below, alongside the
+  // existing per-category insert logic, so no extra DB round-trip is
+  // needed just to build the email.
+  const categoryDetails: EmailDetailRow[] = [];
 
   // "Other" is a one-off free-text tag on this request only — it never
   // gets added to the master Projects list (see admin/projects). Picking
@@ -174,6 +188,22 @@ export async function createRequest(formData: FormData) {
     if (itemRows.length > 0) {
       await supabase.from("delivery_items").insert(itemRows);
     }
+
+    const deliveryLocationVal = (formData.get("delivery_location") as string) || "";
+    if (deliveryLocationVal) {
+      categoryDetails.push({ label: "Delivery location", value: escapeHtml(deliveryLocationVal) });
+    }
+    const deliveryWhen = formatEmailDate(
+      (formData.get("delivery_requested_date") as string) || null,
+      (formData.get("delivery_requested_time") as string) || null
+    );
+    if (deliveryWhen) categoryDetails.push({ label: "Requested for", value: deliveryWhen });
+    if (itemRows.length > 0) {
+      categoryDetails.push({
+        label: "Items",
+        value: `${itemRows.length} item${itemRows.length === 1 ? "" : "s"}`,
+      });
+    }
   }
 
   if (category === "maintenance") {
@@ -190,6 +220,28 @@ export async function createRequest(formData: FormData) {
       photos,
       work_permit: workPermit,
     });
+
+    const locationAreaVal = (formData.get("location_area") as string) || "";
+    if (locationAreaVal) {
+      categoryDetails.push({ label: "Location / area", value: escapeHtml(locationAreaVal) });
+    }
+    const maintenanceTypeVal = (formData.get("maintenance_type") as string) || "";
+    if (maintenanceTypeVal) {
+      categoryDetails.push({ label: "Maintenance type", value: escapeHtml(maintenanceTypeVal) });
+    }
+    const urgencyVal = (formData.get("urgency") as string) || "medium";
+    categoryDetails.push({
+      label: "Urgency",
+      value: urgencyVal.charAt(0).toUpperCase() + urgencyVal.slice(1),
+    });
+    const maintenanceWhen = formatEmailDate(
+      (formData.get("maintenance_date") as string) || null,
+      (formData.get("maintenance_time") as string) || null
+    );
+    if (maintenanceWhen) categoryDetails.push({ label: "Scheduled for", value: maintenanceWhen });
+    if (photos.length > 0) {
+      categoryDetails.push({ label: "Photos attached", value: `${photos.length}` });
+    }
   }
 
   if (category === "labor") {
@@ -212,6 +264,16 @@ export async function createRequest(formData: FormData) {
 
     if (rows.length > 0) {
       await supabase.from("labor_personnel_lines").insert(rows);
+
+      const summary = rows.map((r) => `${r.quantity}× ${r.personnel_type}`).join(", ");
+      categoryDetails.push({ label: "Personnel", value: escapeHtml(summary) });
+      const from = formatEmailDate(dateFrom || null);
+      const to = formatEmailDate(dateTo || null);
+      const when = from && to ? `${from} to ${to}` : from ?? to;
+      if (when) categoryDetails.push({ label: "Dates", value: when });
+      if (natureOfWork) {
+        categoryDetails.push({ label: "Nature of work", value: escapeHtml(natureOfWork) });
+      }
     }
   }
 
@@ -249,6 +311,23 @@ export async function createRequest(formData: FormData) {
     if (itemRows.length > 0) {
       await supabase.from("procurement_line_items").insert(itemRows);
     }
+
+    const purchasingCategoryRaw = (formData.get("purchasing_category") as string) || "";
+    const purchasingCategoryOther = (formData.get("purchasing_category_other") as string) || "";
+    const purchasingCategoryVal = purchasingCategoryOther || purchasingCategoryRaw;
+    if (purchasingCategoryVal) {
+      categoryDetails.push({ label: "Purchasing category", value: escapeHtml(purchasingCategoryVal) });
+    }
+    const vendorVal = (formData.get("vendor") as string) || "";
+    if (vendorVal) categoryDetails.push({ label: "Vendor", value: escapeHtml(vendorVal) });
+    const neededByVal = formatEmailDate((formData.get("procurement_needed_by") as string) || null);
+    if (neededByVal) categoryDetails.push({ label: "Needed by", value: neededByVal });
+    if (itemRows.length > 0) {
+      categoryDetails.push({
+        label: "Items",
+        value: `${itemRows.length} item${itemRows.length === 1 ? "" : "s"}`,
+      });
+    }
   }
 
   // Best-effort notifications for the two audiences that care about a
@@ -264,12 +343,33 @@ export async function createRequest(formData: FormData) {
     const managerEmails = (managers ?? []).map((m) => m.email).filter(Boolean);
     const link = `${APP_URL}/requests/${request.id}`;
     const requestorName = requestorProfile?.full_name ?? "A team member";
+    const projectName = await resolveProjectName(supabase, request.project, request.project_id);
+
+    const sharedFields = {
+      requestNumber: request.request_number,
+      title: request.title,
+      category: request.category,
+      priority: request.priority,
+      project: projectName,
+      department: request.department,
+      dateRequired: request.date_required,
+      concludeDate: request.conclude_date,
+      description: request.description,
+      specialInstructions: request.special_instructions,
+      categoryDetails,
+    };
 
     if (managerEmails.length > 0) {
       await sendNotificationEmail({
         to: managerEmails,
         subject: `New request needs review: ${request.title}`,
-        html: `<p><strong>${request.request_number} — ${request.title}</strong> was submitted by ${requestorName} and needs your review.</p><p><a href="${link}">View request</a></p>`,
+        html: buildRequestEmailHtml({
+          ...sharedFields,
+          requestorName,
+          headline: "New request needs your review",
+          ctaLabel: "Review and approve request",
+          ctaUrl: link,
+        }),
       });
     }
 
@@ -277,7 +377,12 @@ export async function createRequest(formData: FormData) {
       await sendNotificationEmail({
         to: user.email,
         subject: `${request.request_number} has been submitted`,
-        html: `<p>Your request <strong>${request.title}</strong> (${request.request_number}) has been submitted and is awaiting review.</p><p><a href="${link}">View request</a></p>`,
+        html: buildRequestEmailHtml({
+          ...sharedFields,
+          headline: "Your request has been submitted",
+          ctaLabel: "View request",
+          ctaUrl: link,
+        }),
       });
     }
   } catch (err) {
@@ -626,7 +731,13 @@ export async function approveAndAssignRequest(requestId: string, coordinatorId: 
 
   const [{ data: coordinator }, { data: request }] = await Promise.all([
     supabase.from("profiles").select("full_name, email").eq("id", coordinatorId).single(),
-    supabase.from("requests").select("request_number, title").eq("id", requestId).single(),
+    supabase
+      .from("requests")
+      .select(
+        "request_number, title, category, priority, project, project_id, department, date_required, conclude_date, description, special_instructions"
+      )
+      .eq("id", requestId)
+      .single(),
   ]);
 
   // Two sequential updates (rather than one combined update) so the
@@ -660,13 +771,31 @@ export async function approveAndAssignRequest(requestId: string, coordinatorId: 
     redirect(`/requests/${requestId}?error=${encodeURIComponent(error.message)}`);
   }
 
-  if (coordinator?.email) {
+  if (coordinator?.email && request) {
+    const [categoryDetails, projectName] = await Promise.all([
+      fetchCategoryDetails(supabase, request.category, requestId),
+      resolveProjectName(supabase, request.project, request.project_id),
+    ]);
+
     await sendNotificationEmail({
       to: coordinator.email,
-      subject: `You've been assigned: ${request?.request_number ?? "a request"}`,
-      html: `<p>Hi ${coordinator.full_name},</p><p>You've been assigned to handle request <strong>${
-        request?.request_number ?? ""
-      }</strong> — ${request?.title ?? ""}.</p><p><a href="${APP_URL}/requests/${requestId}">View request</a></p>`,
+      subject: `You've been assigned: ${request.request_number}`,
+      html: buildRequestEmailHtml({
+        requestNumber: request.request_number,
+        title: request.title,
+        category: request.category,
+        priority: request.priority,
+        project: projectName,
+        department: request.department,
+        dateRequired: request.date_required,
+        concludeDate: request.conclude_date,
+        description: request.description,
+        specialInstructions: request.special_instructions,
+        categoryDetails,
+        headline: `Hi ${coordinator.full_name}, you've been assigned a request`,
+        ctaLabel: "View and start work",
+        ctaUrl: `${APP_URL}/requests/${requestId}`,
+      }),
     });
   }
 
