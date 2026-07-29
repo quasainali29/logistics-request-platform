@@ -9,6 +9,7 @@ const TABS = [
   { key: "projects", href: "/reports/projects", label: "Projects", permKey: "view_report_projects" },
   { key: "amc", href: "/reports/amc", label: "AMC / Compliance", permKey: "view_report_amc" },
   { key: "coordinator", href: "/reports/coordinator", label: "Coordinator Workload", permKey: "view_report_coordinator" },
+  { key: "cost", href: "/reports/cost", label: "Cost", permKey: "view_report_cost" },
 ] as const;
 
 export function ReportsNav({ active, profile }: { active: string; profile: Profile }) {
