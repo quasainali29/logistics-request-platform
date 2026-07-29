@@ -855,7 +855,7 @@ export async function rejectRequest(requestId: string, reason?: string) {
     await fetch(`${APP_URL}/api/notify`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requestId, status: newStatus }),
+      body: JSON.stringify({ requestId, status: newStatus, reason: reason.trim() }),
     });
   } catch {
     // Email failures should never block the workflow action itself.
