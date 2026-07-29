@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { CATEGORY_LABELS, STATUS_LABELS, type Category } from "@/lib/types";
+import { CATEGORY_LABELS, STATUS_LABELS, COST_CATEGORY_LABELS, type Category } from "@/lib/types";
 
 // Small, dependency-free escaper — request titles/descriptions/instructions
 // are free-text from the submission form and get interpolated straight into
@@ -30,6 +30,13 @@ export function formatEmailDate(
   return timeStr ? `${formatted}, ${timeStr}` : formatted;
 }
 
+// Qatari Riyal — the currency all cost lines are entered in (see
+// request_cost_lines / the Cost report). No Intl.NumberFormat currency
+// support for QAR's symbol, so this is a plain "QAR 123.45" prefix.
+function formatQAR(amount: number): string {
+  return `QAR ${amount.toFixed(2)}`;
+}
+
 const PRIORITY_STYLES: Record<string, { bg: string; text: string; label: string }> = {
   low: { bg: "#f1f5f9", text: "#475569", label: "Low" },
   medium: { bg: "#dbeafe", text: "#1d4ed8", label: "Medium" },
@@ -40,6 +47,12 @@ const PRIORITY_STYLES: Record<string, { bg: string; text: string; label: string 
 export interface EmailDetailRow {
   label: string;
   value: string;
+}
+
+export interface EmailCostLine {
+  category: string;
+  description: string | null;
+  amount: number;
 }
 
 export interface RequestEmailInput {
@@ -56,6 +69,14 @@ export interface RequestEmailInput {
   description?: string | null;
   specialInstructions?: string | null;
   categoryDetails?: EmailDetailRow[];
+  // Present (even as an empty array) to render the "Cost incurred" section —
+  // used on completed/closed notifications. Omit entirely to hide the
+  // section, e.g. for statuses that never carry cost data.
+  costLines?: EmailCostLine[];
+  costTotal?: number;
+  // A manager's note on why a request was sent back — shown on
+  // returned_for_info/rejected notifications only.
+  reason?: string | null;
   headline: string;
   ctaLabel: string;
   ctaUrl: string;
@@ -110,6 +131,48 @@ export function buildRequestEmailHtml(data: RequestEmailInput): string {
       : "",
   ].join("");
 
+  // Manager's note on a returned/rejected request — placed right under the
+  // badges so it's the first thing the requestor reads, before the generic
+  // detail table.
+  const reasonBlock = data.reason
+    ? `<div style="border-top:1px solid #e5e7eb;padding-top:10px;margin-bottom:16px;"><p style="font-size:12px;color:#9ca3af;margin:0 0 4px;">Reason</p><p style="font-size:13px;margin:0;color:#111827;">${escapeHtml(
+        data.reason
+      )}</p></div>`
+    : "";
+
+  // Itemized cost breakdown — only rendered when costLines is present
+  // (completed/closed notifications). Always shows a Total row, even
+  // QAR 0.00, so the requestor can tell cost tracking ran and simply found
+  // nothing logged yet, rather than the section just being absent.
+  const costBlock =
+    data.costLines !== undefined
+      ? (() => {
+          const total = data.costTotal ?? data.costLines!.reduce((sum, l) => sum + l.amount, 0);
+          const lineRows =
+            data.costLines!.length > 0
+              ? data.costLines!
+                  .map((l) => {
+                    const label = COST_CATEGORY_LABELS[l.category] ?? l.category;
+                    const desc = l.description ? ` &mdash; ${escapeHtml(l.description)}` : "";
+                    return `<tr><td style="color:#374151;padding:4px 0;">${label}${desc}</td><td style="padding:4px 0;color:#111827;text-align:right;">${formatQAR(
+                      l.amount
+                    )}</td></tr>`;
+                  })
+                  .join("")
+              : `<tr><td colspan="2" style="padding:4px 0;color:#6b7280;">No cost recorded yet</td></tr>`;
+
+          return `<div style="border-top:1px solid #e5e7eb;padding-top:12px;margin-bottom:16px;">
+      <p style="font-size:12px;color:#9ca3af;margin:0 0 8px;">Cost incurred</p>
+      <table style="width:100%;font-size:13px;border-collapse:collapse;">
+        ${lineRows}
+        <tr><td style="padding:8px 0 0;font-weight:bold;color:#111827;border-top:1px solid #e5e7eb;">Total</td><td style="padding:8px 0 0;font-weight:bold;color:#111827;text-align:right;border-top:1px solid #e5e7eb;">${formatQAR(
+            total
+          )}</td></tr>
+      </table>
+    </div>`;
+        })()
+      : "";
+
   const descriptionBlock = data.description
     ? `<div style="border-top:1px solid #e5e7eb;padding-top:10px;margin-bottom:16px;"><p style="font-size:12px;color:#9ca3af;margin:0 0 4px;">Description</p><p style="font-size:13px;margin:0;color:#111827;">${escapeHtml(
         data.description
@@ -131,7 +194,9 @@ export function buildRequestEmailHtml(data: RequestEmailInput): string {
   </div>
   <div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;padding:20px;">
     <div style="margin-bottom:16px;">${badges}</div>
+    ${reasonBlock}
     <table style="width:100%;font-size:13px;border-collapse:collapse;margin-bottom:16px;">${detailRowsHtml}</table>
+    ${costBlock}
     ${descriptionBlock}${instructionsBlock}
     <div style="text-align:center;margin-top:8px;">
       <a href="${data.ctaUrl}" style="display:inline-block;background:#2563eb;color:#ffffff;font-size:14px;padding:10px 24px;border-radius:6px;text-decoration:none;">${escapeHtml(
