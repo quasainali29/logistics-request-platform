@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { getAppSettings } from "@/lib/cachedLookups";
 import type { AppSettings } from "@/lib/types";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 
 async function getSettings(): Promise<AppSettings | null> {
   try {
@@ -39,6 +40,7 @@ export default async function RootLayout({
     >
       <body className="min-h-full flex flex-col font-sans bg-slate-50 text-slate-900">
         {children}
+        <SpeedInsights />
       </body>
     </html>
   );
