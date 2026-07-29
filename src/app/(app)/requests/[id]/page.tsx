@@ -14,10 +14,12 @@ import {
   type MaintenanceDetails,
   type RequestCloseout,
   type LaborCloseoutLine,
+  type RequestCostLine,
 } from "@/lib/types";
 import { getWorkflowStages } from "@/lib/cachedLookups";
 import { StatusButton, CommentBox, ApproveRejectControls } from "./actions-client";
 import { CloseoutForm } from "./CloseoutForm";
+import { CostBreakdownManager } from "./CostBreakdownManager";
 import { format, parseISO } from "date-fns";
 import { notFound } from "next/navigation";
 import Link from "next/link";
@@ -41,9 +43,6 @@ export default async function RequestDetailPage({
 
   if (!request) notFound();
 
-  // A soft-deleted project still resolves here (the FK link is untouched)
-  // -- we just swap the display label so it doesn't show a name that no
-  // longer exists in the admin's Projects list.
   const linkedProject = request.linked_project as { name: string; deleted_at: string | null } | null;
   const projectDisplay = linkedProject
     ? linkedProject.deleted_at
@@ -58,6 +57,7 @@ export default async function RequestDetailPage({
     { data: transitions },
     { data: closeout },
     { data: laborCloseoutLines },
+    { data: costLines },
   ] = await Promise.all([
     supabase
       .from("comments")
@@ -78,14 +78,15 @@ export default async function RequestDetailPage({
       .order("sort_order", { ascending: true }),
     supabase.from("request_closeouts").select("*").eq("request_id", id).maybeSingle(),
     supabase.from("labor_closeout_lines").select("*").eq("request_id", id),
+    supabase
+      .from("request_cost_lines")
+      .select("*")
+      .eq("request_id", id)
+      .order("created_at", { ascending: true }),
   ]);
 
-  // workflow_stages is cached across all categories; narrow to this
-  // request's category here instead of filtering it in the query itself.
   const stages = allStages.filter((s) => s.category === request.category);
 
-  // Coordinators for the Approve → Assign dropdown, only fetched for
-  // managers viewing a request that's still waiting on the approval gate.
   let coordinators: { id: string; full_name: string }[] = [];
   if (profile.is_manager && request.status === "submitted") {
     const { data: coords } = await supabase
@@ -97,8 +98,6 @@ export default async function RequestDetailPage({
     coordinators = coords ?? [];
   }
 
-  // Pre-populate the labor closeout cost table from the original request's
-  // personnel lines the first time the coordinator opens the closeout form.
   let laborSeedLines: { personnel_type: string; quantity: number; cost_per_labor: number }[] = [];
   if (request.category === "labor" && request.status === "completed") {
     if (laborCloseoutLines && laborCloseoutLines.length > 0) {
@@ -162,13 +161,6 @@ export default async function RequestDetailPage({
   const isOwner = request.requestor_id === profile.id;
   const status = request.status as string;
 
-  // A transition shows up if the current user's role is explicitly allowed,
-  // or they're a manager (managers can always act — same rule the server
-  // action enforces in requests/actions.ts). The generic "submitted ->
-  // under_review" hop is superseded by the Approve/Reject + assign flow
-  // below, and "completed -> closed" is superseded by the closeout form —
-  // both are filtered out here so the old buttons don't show alongside the
-  // new UI.
   const visibleTransitions = availableTransitions.filter((t) => {
     if (status === "submitted" && t.to_key === "under_review") return false;
     if (status === "completed" && t.to_key === "closed") return false;
@@ -176,11 +168,8 @@ export default async function RequestDetailPage({
   });
 
   const closeoutRow = closeout as RequestCloseout | null;
+  const costLineRows = (costLines ?? []) as RequestCostLine[];
   const canManageCloseout = profile.is_manager || profile.role === "logistics_coordinator";
-  // Delivery notes and maintenance reports are generated for whoever is
-  // actually fulfilling the request, not the original requester —
-  // available on any request regardless of status, since it always
-  // reflects current data.
   const canGenerateFulfillmentDocs =
     profile.is_manager ||
     profile.role === "logistics_coordinator" ||
@@ -216,7 +205,6 @@ export default async function RequestDetailPage({
         </p>
       </div>
 
-      {/* Action bar — driven by the admin-configured workflow for this category */}
       <div className="flex flex-wrap gap-2 mb-8">
         {status === "submitted" && profile.is_manager && (
           <ApproveRejectControls
@@ -530,6 +518,14 @@ export default async function RequestDetailPage({
                 </div>
               ) : null}
             </section>
+          )}
+
+          {closeoutRow && canManageCloseout && (
+            <CostBreakdownManager
+              requestId={id}
+              lines={costLineRows}
+              canEdit={!!profile.is_manager}
+            />
           )}
 
           <section className="bg-white border border-slate-200 rounded-xl p-5">
