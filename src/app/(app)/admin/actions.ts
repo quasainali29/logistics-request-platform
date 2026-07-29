@@ -324,6 +324,68 @@ export async function deleteUser(userId: string) {
   revalidatePath("/admin");
 }
 
+// Lets a manager set a user's password directly, no email involved — the
+// same "hand it to them" philosophy as createUserDirectly, for when
+// someone's locked out and self-service email isn't the right path.
+export async function setUserPassword(userId: string, password: string) {
+  await requirePermission("manage_users");
+
+  if (!password || password.length < 6) {
+    redirect("/admin?error=Password+must+be+at+least+6+characters");
+  }
+
+  const admin = createAdminClient();
+  const { error } = await admin.auth.admin.updateUserById(userId, { password });
+
+  if (error) {
+    redirect(`/admin?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath("/admin");
+}
+
+// Alternative to setUserPassword for when the admin would rather the user
+// pick their own new password — generates a real Supabase recovery link
+// and emails it through our own Resend-based sender (not Supabase's built
+// -in auth email), so delivery goes through the same path as every other
+// notification in the app instead of depending on Supabase's SMTP setup.
+export async function sendPasswordResetEmail(userId: string) {
+  const { supabase } = await requirePermission("manage_users");
+
+  const { data: targetProfile } = await supabase
+    .from("profiles")
+    .select("email, full_name")
+    .eq("id", userId)
+    .single();
+
+  if (!targetProfile?.email) {
+    redirect("/admin?error=Couldn't find that user's email address");
+  }
+
+  const admin = createAdminClient();
+  const { data: linkData, error } = await admin.auth.admin.generateLink({
+    type: "recovery",
+    email: targetProfile.email,
+    options: {
+      redirectTo: `${APP_URL}/auth/callback?next=/set-password`,
+    },
+  });
+
+  if (error || !linkData) {
+    redirect(
+      `/admin?error=${encodeURIComponent(error?.message ?? "Couldn't generate a reset link")}`
+    );
+  }
+
+  await sendNotificationEmail({
+    to: targetProfile.email,
+    subject: "Reset your password",
+    html: `<p>Hi ${targetProfile.full_name ?? "there"},</p><p>An administrator started a password reset for your Logistics Platform account. Click below to set a new password:</p><p><a href="${linkData.properties.action_link}">Reset your password</a></p><p>If you weren't expecting this, you can safely ignore this email.</p>`,
+  });
+
+  revalidatePath("/admin");
+}
+
 // ============================================================
 // Roles & Permissions matrix
 // ============================================================
