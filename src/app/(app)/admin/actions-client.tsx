@@ -8,6 +8,8 @@ import {
   deactivateUser,
   reactivateUser,
   deleteUser,
+  setUserPassword,
+  sendPasswordResetEmail,
   setRolePermission,
 } from "./actions";
 import type { RoleRow } from "@/lib/types";
@@ -119,6 +121,32 @@ export function UserRowActions({
           Reactivate
         </button>
       )}
+      <button
+        disabled={pending}
+        onClick={() => {
+          const password = prompt("Enter a new password for this user (min 6 characters):");
+          if (!password) return;
+          if (password.length < 6) {
+            alert("Password must be at least 6 characters.");
+            return;
+          }
+          startTransition(() => setUserPassword(userId, password));
+        }}
+        className="text-xs text-slate-700 hover:underline disabled:opacity-50"
+      >
+        Set Password
+      </button>
+      <button
+        disabled={pending}
+        onClick={() => {
+          if (confirm("Send this user a password reset link by email?")) {
+            startTransition(() => sendPasswordResetEmail(userId));
+          }
+        }}
+        className="text-xs text-blue-700 hover:underline disabled:opacity-50"
+      >
+        Email Reset Link
+      </button>
       <button
         disabled={pending}
         onClick={() => {
