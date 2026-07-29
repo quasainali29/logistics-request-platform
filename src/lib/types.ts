@@ -72,25 +72,12 @@ export interface Profile {
   role: Role;
   department: string | null;
   status: "active" | "inactive";
-  // Derived from the joined `roles` row for the profile's current role.
-  // Populated by getProfile(); defaults to false if the role lookup fails.
   is_staff?: boolean;
   is_manager?: boolean;
-  // Granted permission keys for this profile's role, from role_permissions.
-  // Populated by getProfile(); empty array if the lookup fails. Use the
-  // `can()` helper in @/lib/permissions rather than checking this directly.
   permissions: string[];
-  // Set per-account by an admin when creating it directly (see
-  // admin/actions.ts createUserDirectly). Never hardcoded/mandatory — off
-  // by default. When true, the next successful sign-in redirects to
-  // /set-password before the user can reach the rest of the app.
   must_change_password?: boolean;
 }
 
-// The admin-managed master list a request can link to via project_id.
-// Soft-deleted (deleted_at set) projects are hidden from the request-form
-// dropdown but the row is kept so already-linked requests keep resolving --
-// the UI shows "Unavailable Project" for those instead of the real name.
 export interface Project {
   id: string;
   name: string;
@@ -150,14 +137,7 @@ export interface DeliveryItem {
 }
 
 export const MAINTENANCE_TYPES = [
-  "Electrical",
-  "Plumbing",
-  "HVAC",
-  "Structural",
-  "Equipment",
-  "Painting",
-  "Cleaning",
-  "Other",
+  "Electrical","Plumbing","HVAC","Structural","Equipment","Painting","Cleaning","Other",
 ] as const;
 
 export interface MaintenanceDetails {
@@ -223,9 +203,6 @@ export interface LaborLine {
   nature_of_work: string | null;
 }
 
-// Closeout documents required before a request can move from Completed to
-// Closed. One row per request; only the fields relevant to that request's
-// category are ever populated.
 export interface RequestCloseout {
   id: string;
   request_id: string;
@@ -250,9 +227,33 @@ export interface LaborCloseoutLine {
   total_value: number;
 }
 
-// Fallback labels for the 4 seeded roles, used only when a `roles` row isn't
-// available to look up (e.g. a stale client cache). Prefer passing the real
-// roles list into formatRoleLabel() wherever one is in scope.
+export const COST_CATEGORIES = [
+  { value: "materials", label: "Materials" },
+  { value: "labor", label: "Labor" },
+  { value: "transport", label: "Transport" },
+  { value: "other", label: "Other" },
+] as const;
+
+export type CostCategory = (typeof COST_CATEGORIES)[number]["value"];
+
+export const COST_CATEGORY_LABELS: Record<string, string> = {
+  materials: "Materials",
+  labor: "Labor",
+  transport: "Transport",
+  other: "Other",
+};
+
+export interface RequestCostLine {
+  id: string;
+  request_id: string;
+  cost_category: CostCategory;
+  description: string | null;
+  amount: number;
+  added_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export const ROLE_LABELS: Record<string, string> = {
   requestor: "Requestor",
   logistics_coordinator: "Logistics Coordinator",
@@ -264,16 +265,9 @@ export function formatRoleLabel(roleName: string, roles?: RoleRow[]): string {
   const fromList = roles?.find((r) => r.name === roleName)?.label;
   if (fromList) return fromList;
   if (ROLE_LABELS[roleName]) return ROLE_LABELS[roleName];
-  // Unknown custom role with no roles list in scope — humanize the slug.
-  return roleName
-    .split("_")
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
+  return roleName.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
 }
 
-// Fallback status labels/colors — the seeded defaults, used only when a
-// workflow_stages row isn't available to look up. Prefer passing the real
-// stage list into formatStatusLabel()/statusColor() wherever one is in scope.
 export const STATUS_LABELS: Record<string, string> = {
   submitted: "Submitted",
   under_process: "Under Process",
@@ -304,25 +298,14 @@ export const STATUS_COLORS: Record<string, string> = {
   rejected: "bg-red-100 text-red-800",
 };
 
-export function formatStatusLabel(
-  category: string,
-  statusKey: string,
-  stages?: WorkflowStage[]
-): string {
+export function formatStatusLabel(category: string, statusKey: string, stages?: WorkflowStage[]): string {
   const fromList = stages?.find((s) => s.category === category && s.key === statusKey)?.label;
   if (fromList) return fromList;
   if (STATUS_LABELS[statusKey]) return STATUS_LABELS[statusKey];
-  return statusKey
-    .split("_")
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
+  return statusKey.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
 }
 
-export function statusColor(
-  category: string,
-  statusKey: string,
-  stages?: WorkflowStage[]
-): string {
+export function statusColor(category: string, statusKey: string, stages?: WorkflowStage[]): string {
   const fromList = stages?.find((s) => s.category === category && s.key === statusKey)?.color;
   return fromList ?? STATUS_COLORS[statusKey] ?? "bg-slate-100 text-slate-700";
 }
@@ -341,9 +324,6 @@ export const CATEGORY_LABELS: Record<Category, string> = {
   procurement: "Procurement",
 };
 
-// ============================================================
-// AMC (Annual Maintenance Contracts)
-// ============================================================
 export interface AmcLocation {
   id: string;
   name: string;
@@ -402,19 +382,13 @@ export type AmcDueStatus = "overdue" | "due_soon" | "upcoming";
 export type AmcContractStatus = "active" | "under_renewal" | "expired";
 
 export const FREQUENCY_LABELS: Record<number, string> = {
-  1: "Monthly",
-  2: "Every 2 months",
-  3: "Quarterly",
-  6: "Bi-annual",
-  12: "Annual",
+  1: "Monthly", 2: "Every 2 months", 3: "Quarterly", 6: "Bi-annual", 12: "Annual",
 };
 
 export function frequencyLabel(months: number): string {
   return FREQUENCY_LABELS[months] ?? `Every ${months} months`;
 }
 
-// Due-date status is derived, never stored — it's always accurate against
-// "today" without needing a background job to keep it in sync.
 export function amcDueStatus(nextMaintenanceDate: string, today: Date = new Date()): AmcDueStatus {
   const next = new Date(nextMaintenanceDate);
   const diffDays = Math.floor((next.getTime() - today.getTime()) / 86400000);
@@ -423,12 +397,7 @@ export function amcDueStatus(nextMaintenanceDate: string, today: Date = new Date
   return "upcoming";
 }
 
-// Contract status is likewise derived from contract_end — "under renewal"
-// once within 60 days of expiry, "expired" once past it.
-export function amcContractStatus(
-  contractEnd: string | null,
-  today: Date = new Date()
-): AmcContractStatus {
+export function amcContractStatus(contractEnd: string | null, today: Date = new Date()): AmcContractStatus {
   if (!contractEnd) return "active";
   const end = new Date(contractEnd);
   const diffDays = Math.floor((end.getTime() - today.getTime()) / 86400000);
@@ -438,25 +407,17 @@ export function amcContractStatus(
 }
 
 export const AMC_DUE_STATUS_LABELS: Record<AmcDueStatus, string> = {
-  overdue: "Overdue",
-  due_soon: "Due soon",
-  upcoming: "Upcoming",
+  overdue: "Overdue", due_soon: "Due soon", upcoming: "Upcoming",
 };
 
 export const AMC_DUE_STATUS_COLORS: Record<AmcDueStatus, string> = {
-  overdue: "bg-red-100 text-red-700",
-  due_soon: "bg-amber-100 text-amber-800",
-  upcoming: "bg-emerald-100 text-emerald-800",
+  overdue: "bg-red-100 text-red-700", due_soon: "bg-amber-100 text-amber-800", upcoming: "bg-emerald-100 text-emerald-800",
 };
 
 export const AMC_CONTRACT_STATUS_LABELS: Record<AmcContractStatus, string> = {
-  active: "Active",
-  under_renewal: "Under renewal",
-  expired: "Expired",
+  active: "Active", under_renewal: "Under renewal", expired: "Expired",
 };
 
 export const AMC_CONTRACT_STATUS_COLORS: Record<AmcContractStatus, string> = {
-  active: "bg-emerald-100 text-emerald-800",
-  under_renewal: "bg-amber-100 text-amber-800",
-  expired: "bg-red-100 text-red-700",
+  active: "bg-emerald-100 text-emerald-800", under_renewal: "bg-amber-100 text-amber-800", expired: "bg-red-100 text-red-700",
 };
