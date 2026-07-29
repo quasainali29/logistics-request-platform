@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import type { AttachmentFile } from "@/lib/types";
+import type { AttachmentFile, CostCategory } from "@/lib/types";
 import { sendNotificationEmail } from "@/lib/email";
 import {
   buildRequestEmailHtml,
@@ -866,6 +866,39 @@ export async function rejectRequest(requestId: string, reason?: string) {
   revalidatePath("/dashboard");
 }
 
+// Parses the itemized "Cost incurred" rows from the closeout form
+// (cost_line_category[] / cost_line_description[] / cost_line_amount[])
+// into request_cost_lines insert rows. Shared by every category — unlike
+// the older category-specific cost fields (labor_closeout_lines,
+// request_closeouts.total_value), this is the one cost source that feeds
+// the Cost report. Rows with a zero/blank amount are dropped.
+function parseCostLines(
+  formData: FormData,
+  requestId: string,
+  addedBy: string
+): { request_id: string; cost_category: CostCategory; description: string | null; amount: number; added_by: string }[] {
+  const categories = formData.getAll("cost_line_category[]") as string[];
+  const descriptions = formData.getAll("cost_line_description[]") as string[];
+  const amounts = formData.getAll("cost_line_amount[]") as string[];
+
+  const validCategories = new Set(["materials", "labor", "transport", "other"]);
+
+  return categories
+    .map((cat, i) => {
+      const amount = parseFloat(amounts[i] || "0") || 0;
+      const description = (descriptions[i] || "").trim();
+      const category = (validCategories.has(cat) ? cat : "other") as CostCategory;
+      return {
+        request_id: requestId,
+        cost_category: category,
+        description: description || null,
+        amount,
+        added_by: addedBy,
+      };
+    })
+    .filter((l) => l.amount > 0);
+}
+
 export async function closeRequestWithDocuments(requestId: string, formData: FormData) {
   const supabase = await createClient();
   const {
@@ -999,6 +1032,20 @@ export async function closeRequestWithDocuments(requestId: string, formData: For
 
   if (error) {
     redirect(`/requests/${requestId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  // Itemized cost lines entered on the closeout form — replaces any prior
+  // lines for this request so re-closing (e.g. after being reopened) never
+  // duplicates them. Best-effort: a failure here shouldn't block the
+  // closeout itself, since the request is already closed at this point.
+  try {
+    const costLines = parseCostLines(formData, requestId, user.id);
+    await supabase.from("request_cost_lines").delete().eq("request_id", requestId);
+    if (costLines.length > 0) {
+      await supabase.from("request_cost_lines").insert(costLines);
+    }
+  } catch (err) {
+    console.error("Failed to save cost lines at closeout:", err);
   }
 
   try {
