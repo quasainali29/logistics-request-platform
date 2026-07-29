@@ -35,6 +35,12 @@ const REPORT_CARDS = [
     title: "Coordinator Workload",
     description: "Open and completed requests per owner, with average turnaround.",
   },
+  {
+    href: "/reports/cost",
+    permKey: "view_report_cost",
+    title: "Cost",
+    description: "Cost incurred completing requests, broken down by category, project, and coordinator.",
+  },
 ] as const;
 
 export default async function ReportsPage({
