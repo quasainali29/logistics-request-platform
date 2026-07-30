@@ -2,7 +2,7 @@ import { unstable_cache } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { WorkflowStage } from "@/lib/types";
 import type { AmcLocation, AmcType } from "@/lib/types";
-import type { Project } from "@/lib/types";
+import type { Project, Department } from "@/lib/types";
 
 // These are near-static reference/lookup tables that get re-fetched on
 // almost every page load (dashboard, requests list, request detail, AMC
@@ -67,6 +67,24 @@ export const getActiveProjects = unstable_cache(
   },
   ["active-projects"],
   { tags: ["projects"], revalidate: 300 }
+);
+
+// Active (not soft-deleted) departments, for the request-form dropdown.
+// Same shape/precedent as getActiveProjects above. Invalidated via
+// revalidateTag("departments") from createDepartment()/deleteDepartment()
+// in admin/departments/actions.ts.
+export const getActiveDepartments = unstable_cache(
+  async (): Promise<Department[]> => {
+    const supabase = createAdminClient();
+    const { data } = await supabase
+      .from("departments")
+      .select("*")
+      .is("deleted_at", null)
+      .order("name");
+    return (data ?? []) as Department[];
+  },
+  ["active-departments"],
+  { tags: ["departments"], revalidate: 300 }
 );
 
 // app_settings (branding/org name/accent color/login page look) is a

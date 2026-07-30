@@ -87,6 +87,13 @@ export interface Project {
   created_at: string;
 }
 
+export interface Department {
+  id: string;
+  name: string;
+  deleted_at: string | null;
+  created_at: string;
+}
+
 export interface RequestRow {
   id: string;
   request_number: string;
