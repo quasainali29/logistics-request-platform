@@ -3,12 +3,13 @@ import Link from "next/link";
 export function AdminNav({
   active,
 }: {
-  active: "users" | "permissions" | "projects" | "workflow" | "branding";
+  active: "users" | "permissions" | "projects" | "departments" | "workflow" | "branding";
 }) {
   const tabs = [
     { key: "users", href: "/admin", label: "Users & Roles" },
     { key: "permissions", href: "/admin/permissions", label: "Permissions" },
     { key: "projects", href: "/admin/projects", label: "Projects" },
+    { key: "departments", href: "/admin/departments", label: "Departments" },
     { key: "workflow", href: "/admin/workflow", label: "Workflow" },
     { key: "branding", href: "/admin/branding", label: "Branding" },
   ] as const;
