@@ -2,7 +2,7 @@
 
 import { useState, useRef } from "react";
 import { createRequest, updateRequest } from "../actions";
-import { MAINTENANCE_TYPES, PURCHASING_CATEGORIES, NATURE_OF_WORK_OPTIONS, LABOR_TYPES, type Category, type Project } from "@/lib/types";
+import { MAINTENANCE_TYPES, PURCHASING_CATEGORIES, NATURE_OF_WORK_OPTIONS, LABOR_TYPES, type Category, type Project, type Department } from "@/lib/types";
 import { uploadAttachment, uploadAttachments } from "@/lib/uploadAttachment";
 
 type Attachment = { name: string; url: string };
@@ -85,6 +85,8 @@ interface RequestFormProps {
   // -- so editing an old request doesn't silently drop a since-removed
   // project. Only relevant in edit mode.
   currentProject?: { id: string; name: string; deleted_at: string | null } | null;
+  // Active departments for the dropdown (Admin > Departments).
+  departments?: Department[];
 }
 
 let rowKeyCounter = 0;
@@ -110,6 +112,7 @@ export default function RequestForm({
   initial,
   projects = [],
   currentProject = null,
+  departments = [],
 }: RequestFormProps) {
   const isEdit = mode === "edit";
   const [category, setCategory] = useState<Category | "">(initialCategory ?? "");
@@ -314,11 +317,18 @@ export default function RequestForm({
           <Field label="Department">
             <select name="department" className={inputClass} defaultValue={initial?.department ?? ""}>
               <option value="">Select...</option>
-              <option value="logistics">Logistics</option>
-              <option value="operations">Operations</option>
-              <option value="it">IT</option>
-              <option value="marketing">Marketing</option>
-              <option value="production">Production</option>
+              {/* Covers a department that's since been removed from Admin >
+                  Departments (or an old free-text value from before that
+                  list existed) so the field doesn't silently go blank. */}
+              {initial?.department &&
+                !departments.some((d) => d.name === initial.department) && (
+                  <option value={initial.department}>{initial.department} (unavailable)</option>
+                )}
+              {departments.map((d) => (
+                <option key={d.id} value={d.name}>
+                  {d.name}
+                </option>
+              ))}
             </select>
           </Field>
         </div>

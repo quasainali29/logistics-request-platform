@@ -1,8 +1,11 @@
 import RequestForm from "./RequestForm";
-import { getActiveProjects } from "@/lib/cachedLookups";
+import { getActiveProjects, getActiveDepartments } from "@/lib/cachedLookups";
 
 export default async function NewRequestPage() {
-  const projects = await getActiveProjects();
+  const [projects, departments] = await Promise.all([
+    getActiveProjects(),
+    getActiveDepartments(),
+  ]);
 
   return (
     <div className="p-8">
@@ -12,7 +15,7 @@ export default async function NewRequestPage() {
           Fill in the details below. The form adapts to the category you choose.
         </p>
       </div>
-      <RequestForm projects={projects} />
+      <RequestForm projects={projects} departments={departments} />
     </div>
   );
 }
