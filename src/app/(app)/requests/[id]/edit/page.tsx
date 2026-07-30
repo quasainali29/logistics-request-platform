@@ -2,7 +2,7 @@ import { getProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { redirect, notFound } from "next/navigation";
 import RequestForm, { type RequestFormInitialData } from "../../new/RequestForm";
-import { getActiveProjects } from "@/lib/cachedLookups";
+import { getActiveProjects, getActiveDepartments } from "@/lib/cachedLookups";
 import type { Category } from "@/lib/types";
 
 export default async function EditRequestPage({
@@ -52,7 +52,10 @@ export default async function EditRequestPage({
       .maybeSingle();
     currentProject = proj ?? null;
   }
-  const projects = await getActiveProjects();
+  const [projects, departments] = await Promise.all([
+    getActiveProjects(),
+    getActiveDepartments(),
+  ]);
 
   let initial: RequestFormInitialData = {
     title: request.title,
@@ -169,6 +172,7 @@ export default async function EditRequestPage({
         initial={initial}
         projects={projects}
         currentProject={currentProject}
+        departments={departments}
       />
     </div>
   );
