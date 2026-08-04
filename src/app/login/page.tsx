@@ -28,12 +28,19 @@ export default async function LoginPage({
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           {appSettings?.logo_url ? (
+            // Logo images are usually wide rectangles (wordmarks), not
+            // squares -- forcing width and height to the same value
+            // squeezed them down small via object-contain. Sizing by
+            // height instead (width follows the image's natural aspect
+            // ratio) lets the logo render at its intended size; the
+            // percentage cap keeps oversized uploads from overflowing
+            // the card on narrow screens.
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={appSettings.logo_url}
               alt={orgName}
               className="mx-auto mb-4 object-contain rounded-xl"
-              style={{ width: logoSize, height: logoSize }}
+              style={{ width: logoSize * 2.3, height: "auto", maxWidth: "90%" }}
             />
           ) : (
             <div
