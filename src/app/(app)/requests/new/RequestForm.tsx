@@ -272,11 +272,13 @@ export default function RequestForm({
           </Field>
 
           <Field label="Priority">
+            {/* SLA windows shown directly in the option labels so they're
+                visible both closed and open, with no extra UI needed. */}
             <select name="priority" defaultValue={initial?.priority ?? "medium"} className={inputClass}>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="urgent">Urgent</option>
+              <option value="low">Low (1 week)</option>
+              <option value="medium">Medium (3-4 days)</option>
+              <option value="high">High (24-48 hours)</option>
+              <option value="urgent">Urgent (within 24 hours)</option>
             </select>
           </Field>
         </div>
@@ -614,10 +616,13 @@ export default function RequestForm({
               </select>
             </Field>
             <Field label="Urgency">
+              {/* SLA windows shown directly in the option labels, same
+                  approach and same 4 tiers as Priority above. */}
               <select name="urgency" defaultValue={initial?.urgency ?? "medium"} className={inputClass}>
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
+                <option value="low">Low (1 week)</option>
+                <option value="medium">Medium (3-4 days)</option>
+                <option value="high">High (24-48 hours)</option>
+                <option value="urgent">Urgent (within 24 hours)</option>
               </select>
             </Field>
           </div>
