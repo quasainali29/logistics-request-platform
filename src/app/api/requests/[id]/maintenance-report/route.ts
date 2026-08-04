@@ -63,7 +63,7 @@ export async function GET(
   const { data: request } = await supabase
     .from("requests")
     .select(
-      "*, requestor:profiles!requests_requestor_id_fkey(full_name), approver:profiles!requests_approved_by_fkey(full_name), owner:profiles!requests_owner_id_fkey(full_name)"
+      "*, requestor:profiles!requests_requestor_id_fkey(full_name), approver:profiles!requests_approved_by_fkey(full_name), owner:profiles!requests_owner_id_fkey(full_name), linked_project:projects!requests_project_id_fkey(name, deleted_at)"
     )
     .eq("id", id)
     .single();
@@ -95,6 +95,21 @@ export async function GET(
   const approverName = (request.approver as { full_name?: string } | null)?.full_name ?? "—";
   const ownerName = (request.owner as { full_name?: string } | null)?.full_name ?? "—";
 
+  // Same resolution the request detail page uses: prefer the admin-managed
+  // project linked via project_id, falling back to the legacy free-text
+  // `project` column only when no project_id was ever set. A soft-deleted
+  // project still resolves (the FK link is untouched) -- it just swaps the
+  // label so the report doesn't show a name no longer in the admin's
+  // Projects list.
+  const linkedProject = request.linked_project as
+    | { name: string; deleted_at: string | null }
+    | null;
+  const projectDisplay = linkedProject
+    ? linkedProject.deleted_at
+      ? "Unavailable Project"
+      : linkedProject.name
+    : request.project ?? "—";
+
   const scheduled = maintenanceDetails?.scheduled_date
     ? `${format(parseISO(maintenanceDetails.scheduled_date), "dd/MM/yyyy")}${
         maintenanceDetails.scheduled_time ? ` ${maintenanceDetails.scheduled_time}` : ""
@@ -106,7 +121,7 @@ export async function GET(
     generatedDate: format(new Date(), "dd/MM/yyyy"),
     requestedBy: requestorName,
     department: request.department ?? "—",
-    project: request.project ?? "—",
+    project: projectDisplay,
     approvedBy: approverName,
     assignedTo: ownerName,
     locationArea: maintenanceDetails?.location_area ?? "—",
