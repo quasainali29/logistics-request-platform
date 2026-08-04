@@ -333,7 +333,10 @@ export default function RequestForm({
           </Field>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        {/* Paired date inputs stack to a single column on phones -- native
+            date pickers render wider than a select and get cramped in a
+            fixed 2-column grid at narrow widths. */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Date required">
             <input
               type="date"
@@ -383,7 +386,7 @@ export default function RequestForm({
               className={inputClass}
             />
           </Field>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Requested date">
               <input
                 type="date"
@@ -486,7 +489,7 @@ export default function RequestForm({
       {category === "labor" && (
         <section className="bg-white border border-slate-200 rounded-xl p-6 space-y-4">
           <h2 className="text-sm font-semibold text-slate-900">Labor details</h2>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Date from">
               <input
                 type="date"
@@ -619,7 +622,7 @@ export default function RequestForm({
             </Field>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Scheduled date">
               <input
                 type="date"
