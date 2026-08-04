@@ -152,7 +152,7 @@ export interface MaintenanceDetails {
   request_id: string;
   location_area: string | null;
   maintenance_type: string | null;
-  urgency: "low" | "medium" | "high" | null;
+  urgency: "low" | "medium" | "high" | "urgent" | null;
   scheduled_date: string | null;
   scheduled_time: string | null;
   photos: AttachmentFile[];
