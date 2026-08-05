@@ -5,6 +5,9 @@ import {
   statusColor,
   PRIORITY_COLORS,
   CATEGORY_LABELS,
+  PURCHASING_CATEGORIES,
+  LABOR_TYPES,
+  NATURE_OF_WORK_OPTIONS,
   type Priority,
   type Category,
   type WorkflowStage,
@@ -12,17 +15,33 @@ import {
   type DeliveryDetails,
   type DeliveryItem,
   type MaintenanceDetails,
+  type ProcurementDetails,
+  type ProcurementItem,
+  type LaborLine,
   type RequestCloseout,
   type LaborCloseoutLine,
-  type RequestCostLine,
 } from "@/lib/types";
 import { getWorkflowStages } from "@/lib/cachedLookups";
 import { StatusButton, CommentBox, ApproveRejectControls } from "./actions-client";
 import { CloseoutForm } from "./CloseoutForm";
-import { CostBreakdownManager } from "./CostBreakdownManager";
 import { format, parseISO } from "date-fns";
 import { notFound } from "next/navigation";
 import Link from "next/link";
+
+function purchasingCategoryLabel(value: string | null) {
+  if (!value) return "—";
+  return PURCHASING_CATEGORIES.find((c) => c.value === value)?.label ?? value;
+}
+
+function personnelTypeLabel(value: string | null) {
+  if (!value) return "—";
+  return LABOR_TYPES.find((t) => t.value === value)?.label ?? value;
+}
+
+function natureOfWorkLabel(value: string | null) {
+  if (!value) return "—";
+  return NATURE_OF_WORK_OPTIONS.find((n) => n.value === value)?.label ?? value;
+}
 
 export default async function RequestDetailPage({
   params,
@@ -43,6 +62,9 @@ export default async function RequestDetailPage({
 
   if (!request) notFound();
 
+  // A soft-deleted project still resolves here (the FK link is untouched)
+  // -- we just swap the display label so it doesn't show a name that no
+  // longer exists in the admin's Projects list.
   const linkedProject = request.linked_project as { name: string; deleted_at: string | null } | null;
   const projectDisplay = linkedProject
     ? linkedProject.deleted_at
@@ -57,7 +79,6 @@ export default async function RequestDetailPage({
     { data: transitions },
     { data: closeout },
     { data: laborCloseoutLines },
-    { data: costLines },
   ] = await Promise.all([
     supabase
       .from("comments")
@@ -78,15 +99,14 @@ export default async function RequestDetailPage({
       .order("sort_order", { ascending: true }),
     supabase.from("request_closeouts").select("*").eq("request_id", id).maybeSingle(),
     supabase.from("labor_closeout_lines").select("*").eq("request_id", id),
-    supabase
-      .from("request_cost_lines")
-      .select("*")
-      .eq("request_id", id)
-      .order("created_at", { ascending: true }),
   ]);
 
+  // workflow_stages is cached across all categories; narrow to this
+  // request's category here instead of filtering it in the query itself.
   const stages = allStages.filter((s) => s.category === request.category);
 
+  // Coordinators for the Approve → Assign dropdown, only fetched for
+  // managers viewing a request that's still waiting on the approval gate.
   let coordinators: { id: string; full_name: string }[] = [];
   if (profile.is_manager && request.status === "submitted") {
     const { data: coords } = await supabase
@@ -98,6 +118,8 @@ export default async function RequestDetailPage({
     coordinators = coords ?? [];
   }
 
+  // Pre-populate the labor closeout cost table from the original request's
+  // personnel lines the first time the coordinator opens the closeout form.
   let laborSeedLines: { personnel_type: string; quantity: number; cost_per_labor: number }[] = [];
   if (request.category === "labor" && request.status === "completed") {
     if (laborCloseoutLines && laborCloseoutLines.length > 0) {
@@ -122,7 +144,9 @@ export default async function RequestDetailPage({
   let deliveryDetails: DeliveryDetails | null = null;
   let deliveryItems: DeliveryItem[] = [];
   let maintenanceDetails: MaintenanceDetails | null = null;
-  let genericDetails: Record<string, unknown>[] | null = null;
+  let procurementDetails: ProcurementDetails | null = null;
+  let procurementItems: ProcurementItem[] = [];
+  let laborLines: LaborLine[] = [];
 
   if (request.category === "delivery") {
     const [{ data: dd }, { data: items }] = await Promise.all([
@@ -140,7 +164,7 @@ export default async function RequestDetailPage({
       .from("labor_personnel_lines")
       .select("*")
       .eq("request_id", id);
-    genericDetails = data;
+    laborLines = (data ?? []) as LaborLine[];
   } else if (request.category === "maintenance") {
     const { data } = await supabase
       .from("maintenance_details")
@@ -149,11 +173,16 @@ export default async function RequestDetailPage({
       .maybeSingle();
     maintenanceDetails = data as MaintenanceDetails | null;
   } else if (request.category === "procurement") {
-    const { data } = await supabase
-      .from("procurement_line_items")
-      .select("*")
-      .eq("request_id", id);
-    genericDetails = data;
+    const [{ data: pd }, { data: items }] = await Promise.all([
+      supabase.from("procurement_details").select("*").eq("request_id", id).maybeSingle(),
+      supabase
+        .from("procurement_line_items")
+        .select("*")
+        .eq("request_id", id)
+        .order("item_no", { ascending: true }),
+    ]);
+    procurementDetails = pd as ProcurementDetails | null;
+    procurementItems = (items ?? []) as ProcurementItem[];
   }
 
   const stageList = (stages ?? []) as WorkflowStage[];
@@ -161,6 +190,13 @@ export default async function RequestDetailPage({
   const isOwner = request.requestor_id === profile.id;
   const status = request.status as string;
 
+  // A transition shows up if the current user's role is explicitly allowed,
+  // or they're a manager (managers can always act — same rule the server
+  // action enforces in requests/actions.ts). The generic "submitted ->
+  // under_review" hop is superseded by the Approve/Reject + assign flow
+  // below, and "completed -> closed" is superseded by the closeout form —
+  // both are filtered out here so the old buttons don't show alongside the
+  // new UI.
   const visibleTransitions = availableTransitions.filter((t) => {
     if (status === "submitted" && t.to_key === "under_review") return false;
     if (status === "completed" && t.to_key === "closed") return false;
@@ -168,8 +204,11 @@ export default async function RequestDetailPage({
   });
 
   const closeoutRow = closeout as RequestCloseout | null;
-  const costLineRows = (costLines ?? []) as RequestCostLine[];
   const canManageCloseout = profile.is_manager || profile.role === "logistics_coordinator";
+  // Delivery notes and maintenance reports are generated for whoever is
+  // actually fulfilling the request, not the original requester —
+  // available on any request regardless of status, since it always
+  // reflects current data.
   const canGenerateFulfillmentDocs =
     profile.is_manager ||
     profile.role === "logistics_coordinator" ||
@@ -205,6 +244,7 @@ export default async function RequestDetailPage({
         </p>
       </div>
 
+      {/* Action bar — driven by the admin-configured workflow for this category */}
       <div className="flex flex-wrap gap-2 mb-8">
         {status === "submitted" && profile.is_manager && (
           <ApproveRejectControls
@@ -435,14 +475,127 @@ export default async function RequestDetailPage({
             </section>
           )}
 
-          {genericDetails && genericDetails.length > 0 && (
+          {request.category === "procurement" &&
+            (procurementDetails || procurementItems.length > 0) && (
+              <section className="bg-white border border-slate-200 rounded-xl p-5">
+                <h2 className="text-sm font-semibold text-slate-900 mb-3">
+                  Procurement details
+                </h2>
+
+                {procurementDetails && (
+                  <dl className="space-y-2 text-sm mb-4">
+                    <Row
+                      label="Purchasing category"
+                      value={
+                        procurementDetails.purchasing_category === "other"
+                          ? procurementDetails.purchasing_category_other || "Other"
+                          : purchasingCategoryLabel(procurementDetails.purchasing_category)
+                      }
+                    />
+                    <Row label="Vendor" value={procurementDetails.vendor ?? "—"} />
+                    <Row
+                      label="Needed by"
+                      value={
+                        procurementDetails.needed_by_date
+                          ? format(parseISO(procurementDetails.needed_by_date), "MMM d, yyyy")
+                          : "—"
+                      }
+                    />
+                  </dl>
+                )}
+
+                {procurementItems.length > 0 && (
+                  <div className="overflow-hidden border border-slate-200 rounded-lg">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+                        <tr>
+                          <th className="text-left px-3 py-2 font-medium">#</th>
+                          <th className="text-left px-3 py-2 font-medium">Item</th>
+                          <th className="text-left px-3 py-2 font-medium">Qty</th>
+                          <th className="text-left px-3 py-2 font-medium">Image</th>
+                          <th className="text-left px-3 py-2 font-medium">Purchasing link</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {procurementItems.map((it) => (
+                          <tr key={it.id}>
+                            <td className="px-3 py-2 text-slate-500">{it.item_no}</td>
+                            <td className="px-3 py-2 text-slate-900">
+                              {it.item_description ?? "—"}
+                            </td>
+                            <td className="px-3 py-2 text-slate-700">{it.quantity}</td>
+                            <td className="px-3 py-2">
+                              {it.image_url ? (
+                                <a href={it.image_url} target="_blank" rel="noreferrer">
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={it.image_url}
+                                    alt={it.item_description ?? "Item"}
+                                    className="w-10 h-10 object-cover rounded"
+                                  />
+                                </a>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
+                            <td className="px-3 py-2">
+                              {it.purchasing_link ? (
+                                <a
+                                  href={it.purchasing_link}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-[var(--accent)] underline"
+                                >
+                                  View link
+                                </a>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+            )}
+
+          {request.category === "labor" && laborLines.length > 0 && (
             <section className="bg-white border border-slate-200 rounded-xl p-5">
-              <h2 className="text-sm font-semibold text-slate-900 mb-3">
-                {CATEGORY_LABELS[request.category as Category]} details
-              </h2>
-              <pre className="text-xs text-slate-600 bg-slate-50 rounded-md p-3 overflow-x-auto">
-                {JSON.stringify(genericDetails, null, 2)}
-              </pre>
+              <h2 className="text-sm font-semibold text-slate-900 mb-3">Labor details</h2>
+              <div className="overflow-hidden border border-slate-200 rounded-lg">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium">Type</th>
+                      <th className="text-left px-3 py-2 font-medium">Qty</th>
+                      <th className="text-left px-3 py-2 font-medium">From</th>
+                      <th className="text-left px-3 py-2 font-medium">To</th>
+                      <th className="text-left px-3 py-2 font-medium">Nature of work</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {laborLines.map((l) => (
+                      <tr key={l.id}>
+                        <td className="px-3 py-2 text-slate-900">
+                          {personnelTypeLabel(l.personnel_type)}
+                        </td>
+                        <td className="px-3 py-2 text-slate-700">{l.quantity}</td>
+                        <td className="px-3 py-2 text-slate-700">
+                          {l.date_from ? format(parseISO(l.date_from), "MMM d, yyyy") : "—"}
+                        </td>
+                        <td className="px-3 py-2 text-slate-700">
+                          {l.date_to ? format(parseISO(l.date_to), "MMM d, yyyy") : "—"}
+                        </td>
+                        <td className="px-3 py-2 text-slate-700">
+                          {natureOfWorkLabel(l.nature_of_work)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </section>
           )}
 
@@ -518,14 +671,6 @@ export default async function RequestDetailPage({
                 </div>
               ) : null}
             </section>
-          )}
-
-          {closeoutRow && canManageCloseout && (
-            <CostBreakdownManager
-              requestId={id}
-              lines={costLineRows}
-              canEdit={!!profile.is_manager}
-            />
           )}
 
           <section className="bg-white border border-slate-200 rounded-xl p-5">
