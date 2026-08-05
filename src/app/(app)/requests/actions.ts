@@ -235,7 +235,7 @@ export async function updateRequestStatus(
 
   if (!isOwnerResubmit && !isManager) {
     // Every other transition must be explicitly allowed by the configured
-    // workflow for this category â closes the gap where any staff member
+    // workflow for this category — closes the gap where any staff member
     // could previously set any status regardless of the button they saw.
     const { data: transition } = await supabase
       .from("workflow_transitions")
