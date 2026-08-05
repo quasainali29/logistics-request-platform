@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useRef, type ChangeEvent } from "react";
 import {
   updateRequestStatus,
   addComment,
@@ -33,7 +33,7 @@ export function StatusButton({
       onClick={() => startTransition(() => updateRequestStatus(requestId, status))}
       className={`rounded-md px-4 py-2 text-sm font-medium transition disabled:opacity-50 ${styles}`}
     >
-      {pending ? "Working…" : label}
+      {pending ? "Workingâ¦" : label}
     </button>
   );
 }
@@ -54,7 +54,7 @@ export function ApproveRejectControls({
   const [rejectReason, setRejectReason] = useState("");
 
   // Every category requires a reason before a request can be returned to
-  // the requestor — enforced here via a mandatory popup.
+  // the requestor â enforced here via a mandatory popup.
   function handleRejectClick() {
     setShowReject(true);
   }
@@ -102,14 +102,14 @@ export function ApproveRejectControls({
             </h3>
             <p className="text-xs text-slate-500 mb-3">
               This request will be sent back to the requestor as &ldquo;Returned for
-              Info&rdquo;. A reason is required — the requestor can resubmit the same
+              Info&rdquo;. A reason is required â the requestor can resubmit the same
               request once it&rsquo;s addressed.
             </p>
             <textarea
               value={rejectReason}
               onChange={(e) => setRejectReason(e.target.value)}
               rows={3}
-              placeholder="Reason for returning this request…"
+              placeholder="Reason for returning this requestâ¦"
               className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
             />
             <div className="flex justify-end gap-2">
@@ -129,7 +129,7 @@ export function ApproveRejectControls({
                 onClick={handleConfirmReject}
                 className="rounded-md px-4 py-2 text-sm font-medium bg-red-600 text-white hover:opacity-90 disabled:opacity-50"
               >
-                {pending ? "Submitting…" : "Submit"}
+                {pending ? "Submittingâ¦" : "Submit"}
               </button>
             </div>
           </div>
@@ -151,7 +151,7 @@ export function ApproveRejectControls({
               onChange={(e) => setCoordinatorId(e.target.value)}
               className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
             >
-              <option value="">Select a coordinator…</option>
+              <option value="">Select a coordinatorâ¦</option>
               {coordinators.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.full_name}
@@ -172,7 +172,7 @@ export function ApproveRejectControls({
                 onClick={handleApprove}
                 className="rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
               >
-                {pending ? "Assigning…" : "Confirm & Assign"}
+                {pending ? "Assigningâ¦" : "Confirm & Assign"}
               </button>
             </div>
           </div>
@@ -182,30 +182,113 @@ export function ApproveRejectControls({
   );
 }
 
-export function CommentBox({ requestId }: { requestId: string }) {
+// The mention picker lists every active account regardless of role or
+// department -- not just logistics staff -- since anyone in the org might
+// need to be pulled into a request thread.
+export function CommentBox({
+  requestId,
+  users,
+}: {
+  requestId: string;
+  users: { id: string; full_name: string }[];
+}) {
   const [value, setValue] = useState("");
   const [pending, startTransition] = useTransition();
+  const [showMentions, setShowMentions] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState("");
+  const [mentionStart, setMentionStart] = useState<number | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const filteredUsers = showMentions
+    ? users
+        .filter((u) => u.full_name.toLowerCase().includes(mentionQuery.toLowerCase()))
+        .slice(0, 6)
+    : [];
+
+  function handleChange(e: ChangeEvent<HTMLInputElement>) {
+    const next = e.target.value;
+    setValue(next);
+    const caret = e.target.selectionStart ?? next.length;
+    const atIndex = next.lastIndexOf("@", caret - 1);
+    if (atIndex === -1) {
+      setShowMentions(false);
+      return;
+    }
+    const between = next.slice(atIndex + 1, caret);
+    if (/\s/.test(between)) {
+      setShowMentions(false);
+      return;
+    }
+    setMentionStart(atIndex);
+    setMentionQuery(between);
+    setShowMentions(true);
+  }
+
+  function selectMention(user: { id: string; full_name: string }) {
+    if (mentionStart === null) return;
+    const caret = inputRef.current?.selectionStart ?? value.length;
+    const before = value.slice(0, mentionStart);
+    const after = value.slice(caret);
+    setValue(`${before}@${user.full_name} ${after}`);
+    setShowMentions(false);
+    inputRef.current?.focus();
+  }
+
+  // Longest names first so "Bilal Ahmed" matches before a shorter "Bilal"
+  // could shadow it.
+  function extractMentionedIds(text: string): string[] {
+    return [...users]
+      .sort((a, b) => b.full_name.length - a.full_name.length)
+      .filter((u) => text.includes(`@${u.full_name}`))
+      .map((u) => u.id);
+  }
+
+  function handlePost() {
+    if (!value.trim()) return;
+    const mentionedIds = extractMentionedIds(value);
+    startTransition(async () => {
+      await addComment(requestId, value, mentionedIds);
+      setValue("");
+    });
+  }
 
   return (
-    <div className="flex gap-2">
-      <input
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        placeholder="Add a comment…"
-        className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-      />
-      <button
-        disabled={pending || !value.trim()}
-        onClick={() =>
-          startTransition(async () => {
-            await addComment(requestId, value);
-            setValue("");
-          })
-        }
-        className="rounded-md bg-slate-900 text-white px-4 py-2 text-sm font-medium disabled:opacity-40"
-      >
-        Post
-      </button>
+    <div className="relative">
+      <div className="flex gap-2">
+        <input
+          ref={inputRef}
+          value={value}
+          onChange={handleChange}
+          onBlur={() => setTimeout(() => setShowMentions(false), 150)}
+          placeholder="Add a commentâ¦ (type @ to tag someone)"
+          className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+        />
+        <button
+          disabled={pending || !value.trim()}
+          onClick={handlePost}
+          className="rounded-md bg-slate-900 text-white px-4 py-2 text-sm font-medium disabled:opacity-40"
+        >
+          Post
+        </button>
+      </div>
+
+      {showMentions && filteredUsers.length > 0 && (
+        <div className="absolute z-10 top-full left-0 mt-1 w-64 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
+          {filteredUsers.map((u) => (
+            <button
+              type="button"
+              key={u.id}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                selectMention(u);
+              }}
+              className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 text-slate-900"
+            >
+              {u.full_name}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
