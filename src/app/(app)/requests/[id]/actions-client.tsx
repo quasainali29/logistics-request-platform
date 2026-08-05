@@ -33,7 +33,7 @@ export function StatusButton({
       onClick={() => startTransition(() => updateRequestStatus(requestId, status))}
       className={`rounded-md px-4 py-2 text-sm font-medium transition disabled:opacity-50 ${styles}`}
     >
-      {pending ? "Workingâ¦" : label}
+      {pending ? "Working…" : label}
     </button>
   );
 }
@@ -54,7 +54,7 @@ export function ApproveRejectControls({
   const [rejectReason, setRejectReason] = useState("");
 
   // Every category requires a reason before a request can be returned to
-  // the requestor â enforced here via a mandatory popup.
+  // the requestor — enforced here via a mandatory popup.
   function handleRejectClick() {
     setShowReject(true);
   }
@@ -102,14 +102,14 @@ export function ApproveRejectControls({
             </h3>
             <p className="text-xs text-slate-500 mb-3">
               This request will be sent back to the requestor as &ldquo;Returned for
-              Info&rdquo;. A reason is required â the requestor can resubmit the same
+              Info&rdquo;. A reason is required — the requestor can resubmit the same
               request once it&rsquo;s addressed.
             </p>
             <textarea
               value={rejectReason}
               onChange={(e) => setRejectReason(e.target.value)}
               rows={3}
-              placeholder="Reason for returning this requestâ¦"
+              placeholder="Reason for returning this request…"
               className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
             />
             <div className="flex justify-end gap-2">
@@ -129,7 +129,7 @@ export function ApproveRejectControls({
                 onClick={handleConfirmReject}
                 className="rounded-md px-4 py-2 text-sm font-medium bg-red-600 text-white hover:opacity-90 disabled:opacity-50"
               >
-                {pending ? "Submittingâ¦" : "Submit"}
+                {pending ? "Submitting…" : "Submit"}
               </button>
             </div>
           </div>
@@ -151,7 +151,7 @@ export function ApproveRejectControls({
               onChange={(e) => setCoordinatorId(e.target.value)}
               className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
             >
-              <option value="">Select a coordinatorâ¦</option>
+              <option value="">Select a coordinator…</option>
               {coordinators.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.full_name}
@@ -172,7 +172,7 @@ export function ApproveRejectControls({
                 onClick={handleApprove}
                 className="rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
               >
-                {pending ? "Assigningâ¦" : "Confirm & Assign"}
+                {pending ? "Assigning…" : "Confirm & Assign"}
               </button>
             </div>
           </div>
@@ -260,7 +260,7 @@ export function CommentBox({
           value={value}
           onChange={handleChange}
           onBlur={() => setTimeout(() => setShowMentions(false), 150)}
-          placeholder="Add a commentâ¦ (type @ to tag someone)"
+          placeholder="Add a comment… (type @ to tag someone)"
           className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
         />
         <button
