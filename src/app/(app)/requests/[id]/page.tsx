@@ -478,9 +478,19 @@ export default async function RequestDetailPage({
           {request.category === "procurement" &&
             (procurementDetails || procurementItems.length > 0) && (
               <section className="bg-white border border-slate-200 rounded-xl p-5">
-                <h2 className="text-sm font-semibold text-slate-900 mb-3">
-                  Procurement details
-                </h2>
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <h2 className="text-sm font-semibold text-slate-900">
+                    Procurement details
+                  </h2>
+                  {canGenerateFulfillmentDocs && (
+                    <a
+                      href={`/api/requests/${id}/purchase-requisition`}
+                      className="text-xs text-[var(--accent)] underline whitespace-nowrap"
+                    >
+                      Generate purchase requisition
+                    </a>
+                  )}
+                </div>
 
                 {procurementDetails && (
                   <dl className="space-y-2 text-sm mb-4">
@@ -563,7 +573,17 @@ export default async function RequestDetailPage({
 
           {request.category === "labor" && laborLines.length > 0 && (
             <section className="bg-white border border-slate-200 rounded-xl p-5">
-              <h2 className="text-sm font-semibold text-slate-900 mb-3">Labor details</h2>
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <h2 className="text-sm font-semibold text-slate-900">Labor details</h2>
+                {canGenerateFulfillmentDocs && (
+                  <a
+                    href={`/api/requests/${id}/labor-deployment-sheet`}
+                    className="text-xs text-[var(--accent)] underline whitespace-nowrap"
+                  >
+                    Generate labor deployment sheet
+                  </a>
+                )}
+              </div>
               <div className="overflow-hidden border border-slate-200 rounded-lg">
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
