@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { getProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -41,6 +42,45 @@ function personnelTypeLabel(value: string | null) {
 function natureOfWorkLabel(value: string | null) {
   if (!value) return "—";
   return NATURE_OF_WORK_OPTIONS.find((n) => n.value === value)?.label ?? value;
+}
+
+// Highlights @mentions in posted comment text. Matches full names sorted
+// longest-first so a short name can't shadow a longer one that shares a
+// prefix (e.g. "Bilal" vs "Bilal Ahmed").
+function renderCommentText(
+  text: string,
+  users: { id: string; full_name: string }[]
+) {
+  const names = users
+    .map((u) => u.full_name)
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length);
+
+  if (names.length === 0) return text;
+
+  const escaped = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const pattern = new RegExp(`@(${escaped.join("|")})`, "g");
+
+  const nodes: ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      nodes.push(text.slice(lastIndex, match.index));
+    }
+    nodes.push(
+      <span key={match.index} className="text-[var(--accent)] font-medium">
+        @{match[1]}
+      </span>
+    );
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+
+  return nodes;
 }
 
 export default async function RequestDetailPage({
@@ -117,6 +157,15 @@ export default async function RequestDetailPage({
       .order("full_name", { ascending: true });
     coordinators = coords ?? [];
   }
+
+  // The @mention picker in Comments lists every active account across all
+  // roles and departments — intentionally not scoped to logistics staff.
+  const { data: mentionableProfiles } = await supabase
+    .from("profiles")
+    .select("id, full_name")
+    .eq("status", "active")
+    .order("full_name", { ascending: true });
+  const commentUsers = mentionableProfiles ?? [];
 
   // Pre-populate the labor closeout cost table from the original request's
   // personnel lines the first time the coordinator opens the closeout form.
@@ -704,14 +753,16 @@ export default async function RequestDetailPage({
                   <span className="text-slate-400 text-xs">
                     {format(parseISO(c.posted_at), "MMM d, h:mm a")}
                   </span>
-                  <p className="text-slate-700">{c.comment}</p>
+                  <p className="text-slate-700">
+                    {renderCommentText(c.comment, commentUsers)}
+                  </p>
                 </div>
               ))}
               {(comments ?? []).length === 0 && (
                 <p className="text-sm text-slate-400">No comments yet.</p>
               )}
             </div>
-            <CommentBox requestId={id} />
+            <CommentBox requestId={id} users={commentUsers} />
           </section>
         </div>
 
