@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import type { AttachmentFile, CostCategory } from "@/lib/types";
+import { getWorkflowStages } from "@/lib/cachedLookups";
 import { sendNotificationEmail } from "@/lib/email";
 import {
   buildRequestEmailHtml,
@@ -86,6 +87,59 @@ async function currentUserIsManager(supabase: SupabaseClient, userId: string) {
     .eq("id", userId)
     .single();
   return !!(profile?.role_info as { is_manager: boolean } | null)?.is_manager;
+}
+
+// managerEditRequest needs a handful of joined fields (the requestor's
+// contact info, the actor's role + is_manager flag) that Supabase's
+// generated types resolve inconsistently for `!fk_name(...)` joins
+// depending on how strongly-typed the calling client is. Routing the
+// fetch through a `SupabaseClient`-typed (not the concrete generated
+// client) helper -- same trick currentUserIsManager above already relies
+// on -- sidesteps that entirely instead of fighting it with casts at each
+// call site.
+async function fetchManagerEditContext(
+  supabase: SupabaseClient,
+  requestId: string,
+  userId: string
+) {
+  const [{ data: existing }, { data: actorProfile }] = await Promise.all([
+    supabase
+      .from("requests")
+      .select(
+        "*, requestor:profiles!requests_requestor_id_fkey(full_name, email)"
+      )
+      .eq("id", requestId)
+      .single(),
+    supabase
+      .from("profiles")
+      .select("*, role_info:roles!profiles_role_fkey(is_manager)")
+      .eq("id", userId)
+      .single(),
+  ]);
+
+  const requestor = (existing?.requestor as { full_name: string; email: string } | null) ?? null;
+  const isManager = !!(actorProfile?.role_info as { is_manager: boolean } | null)?.is_manager;
+
+  return {
+    existing: existing
+      ? {
+          requestNumber: existing.request_number as string,
+          category: existing.category as string,
+          status: existing.status as string,
+          requestorId: existing.requestor_id as string,
+          title: existing.title as string,
+          priority: existing.priority as string,
+          project: existing.project as string | null,
+          department: existing.department as string | null,
+          dateRequired: existing.date_required as string | null,
+          concludeDate: existing.conclude_date as string | null,
+          requestorEmail: requestor?.email ?? null,
+        }
+      : null,
+    actorFullName: (actorProfile?.full_name as string | undefined) ?? "A manager",
+    actorRole: (actorProfile?.role as string | undefined) ?? null,
+    isManager,
+  };
 }
 
 export async function createRequest(formData: FormData) {
@@ -393,36 +447,24 @@ export async function createRequest(formData: FormData) {
   redirect(`/requests/${request.id}`);
 }
 
-export async function updateRequest(requestId: string, formData: FormData) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  const { data: existing } = await supabase
-    .from("requests")
-    .select("requestor_id, status, category")
-    .eq("id", requestId)
-    .single();
-
-  if (!existing) {
-    redirect(`/requests/${requestId}?error=${encodeURIComponent("Request not found")}`);
-  }
-
-  // Only the original requestor can edit, and only while the request is
-  // sitting in "Returned for Info" — this is the rectify-and-resubmit path,
-  // not a general-purpose edit feature.
-  if (existing!.requestor_id !== user.id || existing!.status !== "returned_for_info") {
-    redirect(
-      `/requests/${requestId}?error=${encodeURIComponent(
-        "This request can't be edited right now."
-      )}`
-    );
-  }
-
-  const category = existing!.category as string;
-
+// Shared by updateRequest (owner rectify-and-resubmit) and
+// managerEditRequest (manager/coordinator correction) -- both flows edit
+// the exact same set of fields and category-detail tables, and only
+// differ in who's allowed to call them, when, and what happens to
+// `status` and the resulting notification. Pulling the field-parsing and
+// persistence logic out here means those two concerns can never drift
+// out of sync with each other.
+//
+// statusOverride is omitted entirely for the manager path -- the request
+// stays wherever it was in the workflow, since this is a correction to a
+// request still in flight, not a resubmission into the approval queue.
+async function applyRequestEdits(
+  supabase: SupabaseClient,
+  requestId: string,
+  formData: FormData,
+  category: string,
+  statusOverride?: string
+) {
   const projectIdRaw = (formData.get("project_id") as string) || "";
   const projectOther = (formData.get("project_other") as string)?.trim() || "";
   let projectId: string | null = null;
@@ -448,27 +490,50 @@ export async function updateRequest(requestId: string, formData: FormData) {
     }
   }
 
-  // Resubmitting: same request row/number, straight back into the
-  // approval queue (status -> submitted triggers the normal Approve/Reject
-  // flow again).
-  const { error } = await supabase
-    .from("requests")
-    .update({
-      title: formData.get("title") as string,
-      project_id: projectId,
-      project: projectText,
-      department: (formData.get("department") as string) || null,
-      priority: (formData.get("priority") as string) || "medium",
-      date_required: (formData.get("date_required") as string) || null,
-      conclude_date: (formData.get("conclude_date") as string) || null,
-      description: (formData.get("description") as string) || null,
-      special_instructions: (formData.get("special_instructions") as string) || null,
-      status: "submitted",
-    })
-    .eq("id", requestId);
+  // Two near-identical branches instead of one dynamically-built payload
+  // object: the Supabase client's generated row types don't narrow well
+  // through an intermediate Record<string, unknown>, so this keeps both
+  // .update() calls fully type-checked against the real `requests` row
+  // shape.
+  if (statusOverride) {
+    const { error } = await supabase
+      .from("requests")
+      .update({
+        title: formData.get("title") as string,
+        project_id: projectId,
+        project: projectText,
+        department: (formData.get("department") as string) || null,
+        priority: (formData.get("priority") as string) || "medium",
+        date_required: (formData.get("date_required") as string) || null,
+        conclude_date: (formData.get("conclude_date") as string) || null,
+        description: (formData.get("description") as string) || null,
+        special_instructions: (formData.get("special_instructions") as string) || null,
+        status: statusOverride,
+      })
+      .eq("id", requestId);
 
-  if (error) {
-    redirect(`/requests/${requestId}/edit?error=${encodeURIComponent(error.message)}`);
+    if (error) {
+      redirect(`/requests/${requestId}/edit?error=${encodeURIComponent(error.message)}`);
+    }
+  } else {
+    const { error } = await supabase
+      .from("requests")
+      .update({
+        title: formData.get("title") as string,
+        project_id: projectId,
+        project: projectText,
+        department: (formData.get("department") as string) || null,
+        priority: (formData.get("priority") as string) || "medium",
+        date_required: (formData.get("date_required") as string) || null,
+        conclude_date: (formData.get("conclude_date") as string) || null,
+        description: (formData.get("description") as string) || null,
+        special_instructions: (formData.get("special_instructions") as string) || null,
+      })
+      .eq("id", requestId);
+
+    if (error) {
+      redirect(`/requests/${requestId}/edit?error=${encodeURIComponent(error.message)}`);
+    }
   }
 
   if (category === "delivery") {
@@ -599,6 +664,43 @@ export async function updateRequest(requestId: string, formData: FormData) {
       await supabase.from("procurement_line_items").insert(itemRows);
     }
   }
+}
+
+export async function updateRequest(requestId: string, formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { data: existing } = await supabase
+    .from("requests")
+    .select("requestor_id, status, category")
+    .eq("id", requestId)
+    .single();
+
+  if (!existing) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent("Request not found")}`);
+  }
+
+  // Only the original requestor can edit, and only while the request is
+  // sitting in "Returned for Info" — this is the rectify-and-resubmit path,
+  // not a general-purpose edit feature. (Managers/coordinators have a
+  // separate, broader path — see managerEditRequest below.)
+  if (existing!.requestor_id !== user.id || existing!.status !== "returned_for_info") {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "This request can't be edited right now."
+      )}`
+    );
+  }
+
+  const category = existing!.category as string;
+
+  // Resubmitting: same request row/number, straight back into the
+  // approval queue (status -> submitted triggers the normal Approve/Reject
+  // flow again).
+  await applyRequestEdits(supabase, requestId, formData, category, "submitted");
 
   try {
     await fetch(`${APP_URL}/api/notify`, {
@@ -614,6 +716,164 @@ export async function updateRequest(requestId: string, formData: FormData) {
   revalidatePath("/requests");
   revalidatePath("/dashboard");
   redirect(`/requests/${requestId}`);
+}
+
+// A manager or logistics coordinator correcting a request that's still
+// active -- e.g. pushing a due date back because the original timeframe
+// isn't achievable. Unlike updateRequest above, this doesn't touch
+// `status` (the request stays wherever it is in the workflow) and doesn't
+// require the caller to be the requestor. A reason is mandatory and, along
+// with a summary of what actually changed, gets logged as a comment on the
+// request and emailed to the requestor.
+export async function managerEditRequest(requestId: string, formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { existing, actorFullName, actorRole, isManager } = await fetchManagerEditContext(
+    supabase,
+    requestId,
+    user.id
+  );
+
+  if (!existing) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent("Request not found")}`);
+  }
+
+  const isCoordinator = actorRole === "logistics_coordinator";
+  if (!isManager && !isCoordinator) {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "Only managers and coordinators can edit a request this way."
+      )}`
+    );
+  }
+
+  const category = existing!.category;
+  const status = existing!.status;
+
+  // Can't correct a request that's already reached a terminal stage for
+  // its category (e.g. Closed) -- there's nothing left in flight to fix.
+  const stages = await getWorkflowStages();
+  const stage = stages.find((s) => s.category === category && s.key === status);
+  if (stage?.is_terminal) {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "This request is closed and can no longer be edited."
+      )}`
+    );
+  }
+
+  const reason = ((formData.get("edit_reason") as string) || "").trim();
+  if (!reason) {
+    redirect(
+      `/requests/${requestId}/edit?error=${encodeURIComponent(
+        "A reason is required when editing someone else's request."
+      )}`
+    );
+  }
+
+  // Snapshot the fields worth calling out to the requestor before they're
+  // overwritten -- diffed against the newly-submitted form values below.
+  const before = {
+    title: existing!.title,
+    priority: existing!.priority,
+    date_required: existing!.dateRequired,
+    conclude_date: existing!.concludeDate,
+    projectName: existing!.project,
+  };
+
+  await applyRequestEdits(supabase, requestId, formData, category);
+
+  const after = {
+    title: (formData.get("title") as string) || "",
+    priority: (formData.get("priority") as string) || "medium",
+    date_required: (formData.get("date_required") as string) || null,
+    conclude_date: (formData.get("conclude_date") as string) || null,
+  };
+
+  const changeNotes: string[] = [];
+  if (before.title !== after.title) {
+    changeNotes.push(`Title changed from "${before.title}" to "${after.title}"`);
+  }
+  if (before.priority !== after.priority) {
+    changeNotes.push(
+      `Priority changed from ${capitalize(before.priority)} to ${capitalize(after.priority)}`
+    );
+  }
+  if (before.date_required !== after.date_required) {
+    changeNotes.push(
+      `Date required changed from ${formatEmailDate(before.date_required) ?? "—"} to ${
+        formatEmailDate(after.date_required) ?? "—"
+      }`
+    );
+  }
+  if (before.conclude_date !== after.conclude_date) {
+    changeNotes.push(
+      `Conclude by changed from ${formatEmailDate(before.conclude_date) ?? "—"} to ${
+        formatEmailDate(after.conclude_date) ?? "—"
+      }`
+    );
+  }
+
+  const changeSummary = changeNotes.length > 0 ? changeNotes.join("; ") : "Request details updated";
+
+  await supabase.from("comments").insert({
+    request_id: requestId,
+    author_id: user.id,
+    comment: `${changeSummary}. Reason: ${reason}`,
+  });
+
+  if (existing!.requestorEmail && existing!.requestorId !== user.id) {
+    try {
+      // Re-derive the project the same way applyRequestEdits just parsed
+      // it, so the notification reflects whatever was actually saved.
+      const afterProjectIdRaw = (formData.get("project_id") as string) || "";
+      const afterProjectOther = (formData.get("project_other") as string)?.trim() || "";
+      const afterProjectId = afterProjectIdRaw && afterProjectIdRaw !== "other" ? afterProjectIdRaw : null;
+      const afterProjectText = afterProjectIdRaw === "other" ? afterProjectOther : null;
+
+      const [categoryDetails, projectName] = await Promise.all([
+        fetchCategoryDetails(supabase, category, requestId),
+        resolveProjectName(supabase, afterProjectText, afterProjectId),
+      ]);
+      const link = `${APP_URL}/requests/${requestId}`;
+
+      await sendNotificationEmail({
+        to: existing!.requestorEmail,
+        subject: `${existing!.requestNumber} was updated by ${actorFullName}`,
+        html: buildRequestEmailHtml({
+          requestNumber: existing!.requestNumber,
+          title: after.title,
+          category,
+          priority: after.priority,
+          project: projectName ?? before.projectName,
+          department: existing!.department,
+          dateRequired: after.date_required,
+          concludeDate: after.conclude_date,
+          categoryDetails,
+          reason: `${changeSummary}. — ${reason}`,
+          headline: `${actorFullName} updated your request`,
+          ctaLabel: "View request",
+          ctaUrl: link,
+        }),
+      });
+    } catch (err) {
+      console.error("Failed to send request-edit notification email:", err);
+    }
+  }
+
+  revalidatePath(`/requests/${requestId}`);
+  revalidatePath("/requests");
+  revalidatePath("/dashboard");
+  redirect(`/requests/${requestId}`);
+}
+
+function capitalize(value: string): string {
+  if (!value) return value;
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 export async function updateRequestStatus(
