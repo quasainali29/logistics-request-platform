@@ -3,42 +3,151 @@ import { createClient } from "@/lib/supabase/server";
 import { getWorkflowStages } from "@/lib/cachedLookups";
 import Link from "next/link";
 import RequestsTable from "./RequestsTable";
+import RequestsFilterBar from "./RequestsFilterBar";
 
 const PAGE_SIZE = 25;
+
+// Priority has no natural DB ordering (it's a text column, not an enum with
+// severity built in), so "sort by priority" is handled by fetching every
+// filtered row and ranking in memory below -- fine at this data volume, and
+// it keeps the common sorts (date/due) on the cheap range()-paginated path.
+const PRIORITY_RANK: Record<string, number> = { urgent: 4, high: 3, medium: 2, low: 1 };
+
+const REQUEST_SELECT =
+  "*, requestor:profiles!requests_requestor_id_fkey(full_name), owner:profiles!requests_owner_id_fkey(full_name)";
 
 export default async function RequestsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<{
+    page?: string;
+    category?: string;
+    requestor?: string;
+    priority?: string;
+    status?: string;
+    from?: string;
+    to?: string;
+    due?: string;
+    sort?: string;
+  }>;
 }) {
   const params = await searchParams;
   const page = Math.max(1, parseInt(params.page ?? "1", 10) || 1);
   const from = (page - 1) * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;
 
+  const category = params.category || "";
+  const requestorId = params.requestor || "";
+  const priority = params.priority || "";
+  const status = params.status || "";
+  const dateFrom = params.from || "";
+  const dateTo = params.to || "";
+  const due = params.due || "";
+  const sort = params.sort || "newest";
+
   const profile = await getProfile();
   const supabase = await createClient();
   const isStaff = !!profile.is_staff;
   const isManager = !!profile.is_manager;
 
-  let query = supabase
-    .from("requests")
-    .select(
-      "*, requestor:profiles!requests_requestor_id_fkey(full_name), owner:profiles!requests_owner_id_fkey(full_name)",
-      { count: "exact" }
-    );
+  // Non-staff only ever see their own requests -- same restriction the
+  // page always enforced, just applied consistently alongside the new
+  // filters below. Duplicated across the two branches below (rather than
+  // factored into a shared helper) because the Supabase query builder's
+  // generic type narrows with each chained call, which doesn't play well
+  // with a generic wrapper function -- inlining keeps it straightforward
+  // to typecheck.
+  const today = new Date().toISOString().slice(0, 10);
 
-  if (!isStaff) {
-    query = query.eq("requestor_id", profile.id);
+  let requests: Array<Record<string, unknown>> = [];
+  let total = 0;
+
+  if (sort === "priority") {
+    let query = supabase.from("requests").select(REQUEST_SELECT, { count: "exact" });
+    if (!isStaff) query = query.eq("requestor_id", profile.id);
+    if (category) query = query.eq("category", category);
+    if (isStaff && requestorId) query = query.eq("requestor_id", requestorId);
+    if (priority) query = query.eq("priority", priority);
+    if (status) query = query.eq("status", status);
+    if (dateFrom) query = query.gte("created_at", `${dateFrom}T00:00:00`);
+    if (dateTo) query = query.lte("created_at", `${dateTo}T23:59:59`);
+    if (due === "overdue") query = query.lt("date_required", today);
+    else if (due === "next7" || due === "next30") {
+      const upper = new Date();
+      upper.setDate(upper.getDate() + (due === "next7" ? 7 : 30));
+      query = query.gte("date_required", today).lte("date_required", upper.toISOString().slice(0, 10));
+    }
+
+    const { data, count } = await query.order("created_at", { ascending: false });
+    const all = (data ?? []).slice().sort((a: any, b: any) => {
+      const ra = PRIORITY_RANK[a.priority] ?? 0;
+      const rb = PRIORITY_RANK[b.priority] ?? 0;
+      return rb - ra;
+    });
+    total = count ?? all.length;
+    requests = all.slice(from, to + 1);
+  } else {
+    let query = supabase.from("requests").select(REQUEST_SELECT, { count: "exact" });
+    if (!isStaff) query = query.eq("requestor_id", profile.id);
+    if (category) query = query.eq("category", category);
+    if (isStaff && requestorId) query = query.eq("requestor_id", requestorId);
+    if (priority) query = query.eq("priority", priority);
+    if (status) query = query.eq("status", status);
+    if (dateFrom) query = query.gte("created_at", `${dateFrom}T00:00:00`);
+    if (dateTo) query = query.lte("created_at", `${dateTo}T23:59:59`);
+    if (due === "overdue") query = query.lt("date_required", today);
+    else if (due === "next7" || due === "next30") {
+      const upper = new Date();
+      upper.setDate(upper.getDate() + (due === "next7" ? 7 : 30));
+      query = query.gte("date_required", today).lte("date_required", upper.toISOString().slice(0, 10));
+    }
+
+    let ordered;
+    if (sort === "oldest") ordered = query.order("created_at", { ascending: true });
+    else if (sort === "due") ordered = query.order("date_required", { ascending: true, nullsFirst: false });
+    else ordered = query.order("created_at", { ascending: false });
+
+    const { data, count } = await ordered.range(from, to);
+    requests = data ?? [];
+    total = count ?? 0;
   }
 
-  const [{ data: requests, count }, stageList] = await Promise.all([
-    query.order("created_at", { ascending: false }).range(from, to),
-    getWorkflowStages(),
-  ]);
-
-  const total = count ?? 0;
+  const stageList = await getWorkflowStages();
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  // Requestor filter options -- staff only, since non-staff can only ever
+  // see their own requests regardless of this filter (see withFilters
+  // above), so the control would be a no-op for them.
+  let requestorOptions: { id: string; full_name: string }[] = [];
+  if (isStaff) {
+    const { data: requestorRows } = await supabase
+      .from("profiles")
+      .select("id, full_name")
+      .eq("status", "active")
+      .order("full_name");
+    requestorOptions = requestorRows ?? [];
+  }
+
+  // Status filter options -- deduped by key across every category's
+  // configured workflow stages, since the filter applies a plain
+  // `status = key` match regardless of which category the request is in.
+  const statusOptions = Array.from(
+    new Map(stageList.map((s) => [s.key, { value: s.key, label: s.label }])).values()
+  );
+
+  function pageHref(p: number) {
+    const sp = new URLSearchParams();
+    if (category) sp.set("category", category);
+    if (requestorId) sp.set("requestor", requestorId);
+    if (priority) sp.set("priority", priority);
+    if (status) sp.set("status", status);
+    if (dateFrom) sp.set("from", dateFrom);
+    if (dateTo) sp.set("to", dateTo);
+    if (due) sp.set("due", due);
+    if (sort && sort !== "newest") sp.set("sort", sort);
+    sp.set("page", String(p));
+    return `/requests?${sp.toString()}`;
+  }
 
   return (
     <div className="p-8">
@@ -63,8 +172,14 @@ export default async function RequestsPage({
         </Link>
       </div>
 
+      <RequestsFilterBar
+        isStaff={isStaff}
+        requestorOptions={requestorOptions}
+        statusOptions={statusOptions}
+      />
+
       <RequestsTable
-        requests={requests ?? []}
+        requests={requests as any}
         stageList={stageList}
         isStaff={isStaff}
         isManager={isManager}
@@ -73,7 +188,7 @@ export default async function RequestsPage({
       {totalPages > 1 && (
         <div className="flex items-center justify-between mt-4">
           <Link
-            href={`/requests?page=${page - 1}`}
+            href={pageHref(page - 1)}
             aria-disabled={page <= 1}
             className={`text-sm rounded-md px-3 py-1.5 border ${
               page <= 1
@@ -87,7 +202,7 @@ export default async function RequestsPage({
             Page {page} of {totalPages}
           </p>
           <Link
-            href={`/requests?page=${page + 1}`}
+            href={pageHref(page + 1)}
             aria-disabled={page >= totalPages}
             className={`text-sm rounded-md px-3 py-1.5 border ${
               page >= totalPages
