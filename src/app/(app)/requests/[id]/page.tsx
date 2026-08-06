@@ -263,6 +263,17 @@ export default async function RequestDetailPage({
     profile.role === "logistics_coordinator" ||
     profile.role === "warehouse_team";
 
+  // Managers/coordinators can correct an active request's details (e.g.
+  // push the due date back) any time it hasn't reached a terminal stage
+  // for its category. Suppressed when the owner's own "Edit & Resubmit"
+  // link is already showing below, so there aren't two buttons pointing
+  // at the same /edit route.
+  const currentStage = stageList.find((s) => s.key === status);
+  const canManagerEditRequest =
+    (profile.is_manager || profile.role === "logistics_coordinator") &&
+    !currentStage?.is_terminal &&
+    !(isOwner && status === "returned_for_info");
+
   return (
     <div className="p-8 max-w-4xl">
       <div className="mb-6">
@@ -317,6 +328,14 @@ export default async function RequestDetailPage({
             className="rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 transition"
           >
             Edit &amp; Resubmit
+          </Link>
+        )}
+        {canManagerEditRequest && (
+          <Link
+            href={`/requests/${id}/edit`}
+            className="rounded-md px-4 py-2 text-sm font-medium border border-slate-300 text-slate-700 hover:bg-slate-50 transition"
+          >
+            Edit Request
           </Link>
         )}
       </div>
