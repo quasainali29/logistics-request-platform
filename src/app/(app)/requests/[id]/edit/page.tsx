@@ -2,7 +2,7 @@ import { getProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { redirect, notFound } from "next/navigation";
 import RequestForm, { type RequestFormInitialData } from "../../new/RequestForm";
-import { getActiveProjects, getActiveDepartments } from "@/lib/cachedLookups";
+import { getActiveProjects, getActiveDepartments, getWorkflowStages } from "@/lib/cachedLookups";
 import type { Category } from "@/lib/types";
 
 export default async function EditRequestPage({
@@ -19,26 +19,48 @@ export default async function EditRequestPage({
   if (!request) notFound();
 
   const isOwner = request.requestor_id === profile.id;
+  const isManagerActor = profile.is_manager || profile.role === "logistics_coordinator";
 
-  // Editing is only ever the rectify-and-resubmit path: the original
-  // requestor, only while the request is sitting in "Returned for Info".
-  if (!isOwner || request.status !== "returned_for_info") {
+  // Two ways to land here: the original requestor, only while the request
+  // is sitting in "Returned for Info" (rectify-and-resubmit); or a manager
+  // or coordinator correcting an active request (e.g. pushing the due
+  // date back), as long as it hasn't reached a terminal stage for its
+  // category.
+  let formMode: "edit" | "manager-edit";
+  if (isOwner && request.status === "returned_for_info") {
+    formMode = "edit";
+  } else if (isManagerActor) {
+    const stages = await getWorkflowStages();
+    const stage = stages.find(
+      (s) => s.category === request.category && s.key === request.status
+    );
+    if (stage?.is_terminal) {
+      redirect(
+        `/requests/${id}?error=${encodeURIComponent(
+          "This request is closed and can no longer be edited."
+        )}`
+      );
+    }
+    formMode = "manager-edit";
+  } else {
     redirect(
       `/requests/${id}?error=${encodeURIComponent("This request can't be edited right now.")}`
     );
   }
 
   // Surface the manager's most recent rejection reason so the requester
-  // knows what to fix before resubmitting.
-  const { data: comments } = await supabase
-    .from("comments")
-    .select("comment, posted_at")
-    .eq("request_id", id)
-    .order("posted_at", { ascending: false })
-    .limit(10);
-  const reasonComment = (comments ?? []).find((c) =>
-    c.comment?.startsWith("Returned for info:")
-  );
+  // knows what to fix before resubmitting -- only relevant on the
+  // owner's rectify-and-resubmit path.
+  let reasonComment: { comment: string; posted_at: string } | undefined;
+  if (formMode === "edit") {
+    const { data: comments } = await supabase
+      .from("comments")
+      .select("comment, posted_at")
+      .eq("request_id", id)
+      .order("posted_at", { ascending: false })
+      .limit(10);
+    reasonComment = (comments ?? []).find((c) => c.comment?.startsWith("Returned for info:"));
+  }
 
   // The request's linked project, fetched even if it's since been
   // soft-deleted -- RequestForm needs to know that to render it as an
@@ -153,10 +175,13 @@ export default async function EditRequestPage({
     <div className="p-8">
       <div className="mb-6 max-w-2xl">
         <p className="text-xs text-slate-500 mb-1">{request.request_number}</p>
-        <h1 className="text-xl font-semibold text-slate-900">Edit &amp; resubmit request</h1>
+        <h1 className="text-xl font-semibold text-slate-900">
+          {formMode === "manager-edit" ? "Edit request" : "Edit & resubmit request"}
+        </h1>
         <p className="text-sm text-slate-500 mt-1">
-          This request was returned for info. Update the details below and resubmit — it goes
-          back into the approval queue under the same request number.
+          {formMode === "manager-edit"
+            ? "Update the details below. The requestor will be notified of what changed and why."
+            : "This request was returned for info. Update the details below and resubmit — it goes back into the approval queue under the same request number."}
         </p>
         {reasonComment && (
           <div className="mt-3 rounded-md border border-orange-200 bg-orange-50 text-orange-800 text-sm px-4 py-3">
@@ -166,7 +191,7 @@ export default async function EditRequestPage({
         )}
       </div>
       <RequestForm
-        mode="edit"
+        mode={formMode}
         requestId={id}
         category={request.category as Category}
         initial={initial}
