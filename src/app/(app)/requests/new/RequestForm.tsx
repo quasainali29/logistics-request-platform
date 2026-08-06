@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { createRequest, updateRequest } from "../actions";
+import { createRequest, updateRequest, managerEditRequest } from "../actions";
 import { MAINTENANCE_TYPES, PURCHASING_CATEGORIES, NATURE_OF_WORK_OPTIONS, LABOR_TYPES, type Category, type Project, type Department } from "@/lib/types";
 import { uploadAttachment, uploadAttachments } from "@/lib/uploadAttachment";
 
@@ -75,7 +75,7 @@ export interface RequestFormInitialData {
 }
 
 interface RequestFormProps {
-  mode?: "create" | "edit";
+  mode?: "create" | "edit" | "manager-edit";
   requestId?: string;
   category?: Category;
   initial?: RequestFormInitialData;
@@ -114,7 +114,8 @@ export default function RequestForm({
   currentProject = null,
   departments = [],
 }: RequestFormProps) {
-  const isEdit = mode === "edit";
+  const isEdit = mode !== "create";
+  const isManagerEdit = mode === "manager-edit";
   const [category, setCategory] = useState<Category | "">(initialCategory ?? "");
   const [projectChoice, setProjectChoice] = useState<string>(
     initial?.project_id ? initial.project_id : initial?.project ? "other" : ""
@@ -218,7 +219,9 @@ export default function RequestForm({
         );
       }
 
-      if (isEdit && requestId) {
+      if (isManagerEdit && requestId) {
+        await managerEditRequest(requestId, out);
+      } else if (isEdit && requestId) {
         await updateRequest(requestId, out);
       } else {
         await createRequest(out);
@@ -828,12 +831,36 @@ export default function RequestForm({
         </section>
       )}
 
+      {isManagerEdit && (
+        <section className="bg-white border border-slate-200 rounded-xl p-6 space-y-4">
+          <h2 className="text-sm font-semibold text-slate-900">Reason for change</h2>
+          <p className="text-xs text-slate-500 -mt-2">
+            Shown to the requestor along with a summary of what changed.
+          </p>
+          <Field label="Reason" required>
+            <textarea
+              name="edit_reason"
+              required
+              rows={3}
+              className={inputClass}
+              placeholder="e.g. Contractor unavailable until the 14th, pushing the due date back a week."
+            />
+          </Field>
+        </section>
+      )}
+
       <button
         type="submit"
         disabled={submitting}
         className="bg-[var(--accent)] text-white rounded-md px-5 py-2.5 text-sm font-medium hover:opacity-90 transition disabled:opacity-60 disabled:cursor-not-allowed"
       >
-        {submitting ? "Submitting…" : isEdit ? "Save & Resubmit" : "Submit request"}
+        {submitting
+          ? "Submitting…"
+          : isManagerEdit
+          ? "Save changes"
+          : isEdit
+          ? "Save & Resubmit"
+          : "Submit request"}
       </button>
     </form>
   );
