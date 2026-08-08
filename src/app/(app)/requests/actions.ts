@@ -1204,7 +1204,21 @@ export async function technicianCompleteJob(requestId: string, formData: FormDat
     signatureUrl = uploaded?.url ?? null;
   }
 
-  await supabase.from("request_closeouts").upsert(
+  if (!signatureUrl) {
+    redirect(
+      `/requests/${requestId}/complete?error=${encodeURIComponent(
+        "The signature couldn't be saved. Please sign again and resubmit."
+      )}`
+    );
+  }
+
+  // Written BEFORE the status flip below, and its error checked explicitly --
+  // if this silently failed (e.g. an RLS gap) the request would otherwise
+  // still flip to "Completed" with no proof attached, which is exactly the
+  // bug this closed: a technician cleared to change status, but not yet
+  // cleared to write the closeout row itself, so the job looked done with
+  // nothing for the coordinator to actually review.
+  const { error: closeoutError } = await supabase.from("request_closeouts").upsert(
     {
       request_id: requestId,
       technician_photos: photos,
@@ -1218,7 +1232,26 @@ export async function technicianCompleteJob(requestId: string, formData: FormDat
     { onConflict: "request_id" }
   );
 
-  await supabase.from("requests").update({ status: "completed" }).eq("id", requestId);
+  if (closeoutError) {
+    redirect(
+      `/requests/${requestId}/complete?error=${encodeURIComponent(
+        "Couldn't save your submission: " + closeoutError.message
+      )}`
+    );
+  }
+
+  const { error: statusError } = await supabase
+    .from("requests")
+    .update({ status: "completed" })
+    .eq("id", requestId);
+
+  if (statusError) {
+    redirect(
+      `/requests/${requestId}/complete?error=${encodeURIComponent(
+        "Saved your photos and signature, but couldn't update the status: " + statusError.message
+      )}`
+    );
+  }
 
   const owner = request.owner as unknown as { full_name: string; email: string } | null;
   if (owner?.email) {
