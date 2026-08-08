@@ -22,6 +22,7 @@ export default async function AppLayout({
       roleLabel={formatRoleLabel(profile.role)}
       permissions={profile.permissions}
       isManager={!!profile.is_manager}
+      isTechnician={profile.role === "technician"}
       signOutAction={signOut}
     >
       {children}

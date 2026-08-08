@@ -111,18 +111,26 @@ export interface RequestRow {
   description: string | null;
   special_instructions: string | null;
   owner_id: string | null;
+  assigned_technician_id: string | null;
   approved_by: string | null;
   approval_date: string | null;
   created_at: string;
   updated_at: string;
   requestor?: Profile;
   owner?: Profile;
+  assigned_technician?: Profile;
   // Populated only on the requests list query (a join alongside the plain
   // `project_id`/`project` columns above) so the table can show a live
   // project name without an extra query per row. Prefer this over the
   // raw `project` text column when both are present.
   linked_project?: { name: string } | null;
 }
+
+export const SIGNED_BY_ROLE_LABELS: Record<string, string> = {
+  requestor: "Requestor",
+  site_supervisor: "Site Supervisor",
+  other: "Other",
+};
 
 export interface AttachmentFile {
   name: string;
@@ -228,6 +236,17 @@ export interface RequestCloseout {
   total_value: number | null;
   closed_by: string | null;
   closed_at: string;
+  // Technician job-completion fields (see migration 018) -- populated when
+  // a technician submits "Mark Completed" from the mobile flow, regardless
+  // of category. Independent of the category-specific fields above, which
+  // the coordinator/manager still fill in afterward for the formal closeout.
+  technician_photos: AttachmentFile[];
+  technician_notes: string | null;
+  signature_url: string | null;
+  signed_by_name: string | null;
+  signed_by_role: string | null;
+  signed_at: string | null;
+  submitted_by_technician_id: string | null;
 }
 
 export interface LaborCloseoutLine {

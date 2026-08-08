@@ -1064,6 +1064,184 @@ export async function approveAndAssignRequest(requestId: string, coordinatorId: 
   revalidatePath("/dashboard");
 }
 
+// Coordinator/manager picks a technician for a request that's already
+// theirs (status "under_process" / "Team Assigned"). Sets the request to
+// "assigned" -- the first of the three dormant stages (assigned, dispatched,
+// on_site) that this feature finally wires up with real buttons, gated to
+// the technician role via workflow_transitions (see migration 018).
+export async function assignTechnician(requestId: string, technicianId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { data: actor } = await supabase
+    .from("profiles")
+    .select("role, role_info:roles!profiles_role_fkey(is_manager)")
+    .eq("id", user.id)
+    .single();
+
+  const isManager = !!(actor?.role_info as unknown as { is_manager: boolean } | null)?.is_manager;
+  const canAssign = isManager || actor?.role === "logistics_coordinator";
+  if (!canAssign) {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "You don't have permission to assign a technician."
+      )}`
+    );
+  }
+
+  if (!technicianId) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent("Please select a technician.")}`);
+  }
+
+  const [{ data: technician }, { data: request }] = await Promise.all([
+    supabase.from("profiles").select("full_name, email").eq("id", technicianId).single(),
+    supabase
+      .from("requests")
+      .select("request_number, title, category, priority, project, project_id, department, date_required")
+      .eq("id", requestId)
+      .single(),
+  ]);
+
+  const { error } = await supabase
+    .from("requests")
+    .update({ assigned_technician_id: technicianId, status: "assigned" })
+    .eq("id", requestId);
+
+  if (error) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  if (technician?.email && request) {
+    const [categoryDetails, projectName] = await Promise.all([
+      fetchCategoryDetails(supabase, request.category, requestId),
+      resolveProjectName(supabase, request.project, request.project_id),
+    ]);
+
+    await sendNotificationEmail({
+      to: technician.email,
+      subject: `New job assigned: ${request.request_number}`,
+      html: buildRequestEmailHtml({
+        requestNumber: request.request_number,
+        title: request.title,
+        category: request.category,
+        priority: request.priority,
+        project: projectName,
+        department: request.department,
+        dateRequired: request.date_required,
+        categoryDetails,
+        headline: `Hi ${technician.full_name}, a job has been assigned to you`,
+        ctaLabel: "View job",
+        ctaUrl: `${APP_URL}/requests/${requestId}`,
+      }),
+    });
+  }
+
+  revalidatePath(`/requests/${requestId}`);
+  revalidatePath("/requests");
+}
+
+// The technician's "Mark Completed" submission from the mobile flow at
+// /requests/[id]/complete -- uploads photos and the on-screen signature,
+// writes them to request_closeouts alongside the signer's name/role, and
+// moves the request to "completed". This does NOT close the request --
+// that stays a separate, coordinator/manager-only step via the existing
+// CloseoutForm + "Close Request" button, unchanged by this feature.
+export async function technicianCompleteJob(requestId: string, formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { data: request } = await supabase
+    .from("requests")
+    .select("assigned_technician_id, status, request_number, title, category, owner:profiles!requests_owner_id_fkey(full_name, email)")
+    .eq("id", requestId)
+    .single();
+
+  if (!request) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent("Request not found.")}`);
+  }
+
+  if (request.assigned_technician_id !== user.id) {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "Only the technician assigned to this job can complete it."
+      )}`
+    );
+  }
+
+  const notes = (formData.get("notes") as string) || null;
+  const signedByName = (formData.get("signed_by_name") as string) || null;
+  const signedByRole = (formData.get("signed_by_role") as string) || null;
+  const signatureDataUrl = (formData.get("signature") as string) || "";
+  const photoFiles = (formData.getAll("photos") as File[]).filter((f) => f && f.size > 0);
+
+  if (!signatureDataUrl || !signedByName || !signedByRole) {
+    redirect(
+      `/requests/${requestId}/complete?error=${encodeURIComponent(
+        "A signature, signer name, and signer role are all required."
+      )}`
+    );
+  }
+
+  const photos = await uploadMany(supabase, `closeout/${requestId}`, photoFiles);
+
+  // The signature arrives as a data URL (canvas.toDataURL()) rather than a
+  // File -- decode it into one so it goes through the same uploadOne()
+  // path (and the same storage bucket/policy) as every other closeout file.
+  let signatureUrl: string | null = null;
+  const match = signatureDataUrl.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
+  if (match) {
+    const [, mime, base64] = match;
+    const bytes = Buffer.from(base64, "base64");
+    const ext = mime.split("/")[1] || "png";
+    const signatureFile = new File([bytes], `signature.${ext}`, { type: mime });
+    const uploaded = await uploadOne(supabase, `closeout/${requestId}`, signatureFile);
+    signatureUrl = uploaded?.url ?? null;
+  }
+
+  await supabase.from("request_closeouts").upsert(
+    {
+      request_id: requestId,
+      technician_photos: photos,
+      technician_notes: notes,
+      signature_url: signatureUrl,
+      signed_by_name: signedByName,
+      signed_by_role: signedByRole,
+      signed_at: new Date().toISOString(),
+      submitted_by_technician_id: user.id,
+    },
+    { onConflict: "request_id" }
+  );
+
+  await supabase.from("requests").update({ status: "completed" }).eq("id", requestId);
+
+  const owner = request.owner as unknown as { full_name: string; email: string } | null;
+  if (owner?.email) {
+    await sendNotificationEmail({
+      to: owner.email,
+      subject: `${request.request_number} is ready for your review`,
+      html: buildRequestEmailHtml({
+        requestNumber: request.request_number,
+        title: request.title,
+        category: request.category,
+        headline: `${request.request_number} has been marked completed by the technician`,
+        ctaLabel: "Review and close",
+        ctaUrl: `${APP_URL}/requests/${requestId}`,
+      }),
+    });
+  }
+
+  revalidatePath(`/requests/${requestId}`);
+  revalidatePath("/requests");
+  revalidatePath("/dashboard");
+  redirect(`/requests/${requestId}`);
+}
+
 export async function rejectRequest(requestId: string, reason?: string) {
   const supabase = await createClient();
   const {

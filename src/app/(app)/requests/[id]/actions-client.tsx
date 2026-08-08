@@ -6,6 +6,7 @@ import {
   addComment,
   approveAndAssignRequest,
   rejectRequest,
+  assignTechnician,
 } from "../actions";
 
 export function StatusButton({
@@ -170,6 +171,85 @@ export function ApproveRejectControls({
                 type="button"
                 disabled={pending || !coordinatorId}
                 onClick={handleApprove}
+                className="rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {pending ? "Assigning…" : "Confirm & Assign"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// Coordinator/manager picks a technician for a request that's already
+// theirs -- moves it to "Assigned" and emails the technician. Modeled on
+// ApproveRejectControls' popup pattern above.
+export function AssignTechnicianControl({
+  requestId,
+  technicians,
+}: {
+  requestId: string;
+  technicians: { id: string; full_name: string }[];
+}) {
+  const [pending, startTransition] = useTransition();
+  const [showAssign, setShowAssign] = useState(false);
+  const [technicianId, setTechnicianId] = useState("");
+
+  function handleAssign() {
+    if (!technicianId) return;
+    startTransition(() => {
+      assignTechnician(requestId, technicianId);
+      setShowAssign(false);
+    });
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        disabled={pending}
+        onClick={() => setShowAssign(true)}
+        className="rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 transition disabled:opacity-50"
+      >
+        Assign Technician
+      </button>
+
+      {showAssign && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 w-full max-w-sm">
+            <h3 className="text-sm font-semibold text-slate-900 mb-1">
+              Assign a technician
+            </h3>
+            <p className="text-xs text-slate-500 mb-3">
+              This request will move to &ldquo;Assigned&rdquo; and the selected
+              technician will be notified by email to accept the job.
+            </p>
+            <select
+              value={technicianId}
+              onChange={(e) => setTechnicianId(e.target.value)}
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+            >
+              <option value="">Select a technician…</option>
+              {technicians.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.full_name}
+                </option>
+              ))}
+            </select>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowAssign(false)}
+                className="rounded-md px-4 py-2 text-sm font-medium bg-white border border-slate-300 text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={pending || !technicianId}
+                onClick={handleAssign}
                 className="rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
               >
                 {pending ? "Assigning…" : "Confirm & Assign"}

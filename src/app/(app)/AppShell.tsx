@@ -24,6 +24,7 @@ interface AppShellProps {
   roleLabel: string;
   permissions: string[];
   isManager: boolean;
+  isTechnician?: boolean;
   signOutAction: () => Promise<void>;
   children: React.ReactNode;
 }
@@ -39,6 +40,7 @@ export default function AppShell({
   roleLabel,
   permissions,
   isManager,
+  isTechnician = false,
   signOutAction,
   children,
 }: AppShellProps) {
@@ -47,8 +49,13 @@ export default function AppShell({
   const can = (key: string) => permissions.includes(key);
 
   const navItems = [
-    { href: "/requests/new", label: "New Request", icon: PlusCircle, show: true },
-    { href: "/requests", label: "Requests", icon: ClipboardList, show: true },
+    { href: "/requests/new", label: "New Request", icon: PlusCircle, show: !isTechnician },
+    {
+      href: "/requests",
+      label: isTechnician ? "My Jobs" : "Requests",
+      icon: ClipboardList,
+      show: true,
+    },
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, show: true },
     { href: "/amc", label: "AMC Contracts", icon: Wrench, show: can("view_amc") },
     { href: "/reports", label: "Reports", icon: BarChart3, show: can("view_reports") },

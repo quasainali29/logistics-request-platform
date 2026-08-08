@@ -50,6 +50,10 @@ export default async function RequestsPage({
   const profile = await getProfile();
   const supabase = await createClient();
   const isStaff = !!profile.is_staff;
+  // A technician doesn't submit requests -- they're never the requestor --
+  // so the default "own requests" filter below would show them nothing.
+  // They see jobs assigned to them instead, same list/filter/pagination UI.
+  const isTechnician = profile.role === "technician";
   const isManager = !!profile.is_manager;
 
   // Non-staff only ever see their own requests -- same restriction the
@@ -66,7 +70,10 @@ export default async function RequestsPage({
 
   if (sort === "priority") {
     let query = supabase.from("requests").select(REQUEST_SELECT, { count: "exact" });
-    if (!isStaff) query = query.eq("requestor_id", profile.id);
+    if (!isStaff) {
+      if (isTechnician) query = query.eq("assigned_technician_id", profile.id);
+      else query = query.eq("requestor_id", profile.id);
+    }
     if (category) query = query.eq("category", category);
     if (projectId) query = query.eq("project_id", projectId);
     if (isStaff && requestorId) query = query.eq("requestor_id", requestorId);
@@ -91,7 +98,10 @@ export default async function RequestsPage({
     requests = all.slice(from, to + 1);
   } else {
     let query = supabase.from("requests").select(REQUEST_SELECT, { count: "exact" });
-    if (!isStaff) query = query.eq("requestor_id", profile.id);
+    if (!isStaff) {
+      if (isTechnician) query = query.eq("assigned_technician_id", profile.id);
+      else query = query.eq("requestor_id", profile.id);
+    }
     if (category) query = query.eq("category", category);
     if (projectId) query = query.eq("project_id", projectId);
     if (isStaff && requestorId) query = query.eq("requestor_id", requestorId);
@@ -163,7 +173,11 @@ export default async function RequestsPage({
         <div>
           <h1 className="text-xl font-semibold text-slate-900">Requests</h1>
           <p className="text-sm text-slate-500 mt-1">
-            {isStaff ? "All requests across the team." : "Requests you've submitted."}
+            {isStaff
+              ? "All requests across the team."
+              : isTechnician
+              ? "Jobs assigned to you."
+              : "Requests you've submitted."}
             {total > 0 && (
               <span className="text-slate-400">
                 {" "}

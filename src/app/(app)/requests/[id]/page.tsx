@@ -21,9 +21,11 @@ import {
   type LaborLine,
   type RequestCloseout,
   type LaborCloseoutLine,
+  SIGNED_BY_ROLE_LABELS,
 } from "@/lib/types";
 import { getWorkflowStages } from "@/lib/cachedLookups";
-import { StatusButton, CommentBox, ApproveRejectControls } from "./actions-client";
+import { can } from "@/lib/permissions";
+import { StatusButton, CommentBox, ApproveRejectControls, AssignTechnicianControl } from "./actions-client";
 import { CloseoutForm } from "./CloseoutForm";
 import { format, parseISO } from "date-fns";
 import { notFound } from "next/navigation";
@@ -95,7 +97,7 @@ export default async function RequestDetailPage({
   const { data: request } = await supabase
     .from("requests")
     .select(
-      "*, requestor:profiles!requests_requestor_id_fkey(full_name, email), approver:profiles!requests_approved_by_fkey(full_name), owner:profiles!requests_owner_id_fkey(full_name), linked_project:projects!requests_project_id_fkey(name, deleted_at)"
+      "*, requestor:profiles!requests_requestor_id_fkey(full_name, email), approver:profiles!requests_approved_by_fkey(full_name), owner:profiles!requests_owner_id_fkey(full_name), assigned_technician:profiles!requests_assigned_technician_id_fkey(full_name), linked_project:projects!requests_project_id_fkey(name, deleted_at)"
     )
     .eq("id", id)
     .single();
@@ -156,6 +158,25 @@ export default async function RequestDetailPage({
       .eq("status", "active")
       .order("full_name", { ascending: true });
     coordinators = coords ?? [];
+  }
+
+  // Only offered once the coordinator already owns the request and no
+  // technician has been picked yet -- reassigning afterward isn't
+  // supported by this first pass, matching how "Assign to coordinator"
+  // above is also a one-time action.
+  let technicians: { id: string; full_name: string }[] = [];
+  const canAssignTechnician =
+    can(profile, "assign_technician") &&
+    request.status === "under_process" &&
+    !request.assigned_technician_id;
+  if (canAssignTechnician) {
+    const { data: techs } = await supabase
+      .from("profiles")
+      .select("id, full_name")
+      .eq("role", "technician")
+      .eq("status", "active")
+      .order("full_name", { ascending: true });
+    technicians = techs ?? [];
   }
 
   // The @mention picker in Comments lists every active account across all
@@ -237,6 +258,7 @@ export default async function RequestDetailPage({
   const stageList = (stages ?? []) as WorkflowStage[];
   const availableTransitions = (transitions ?? []) as WorkflowTransition[];
   const isOwner = request.requestor_id === profile.id;
+  const isAssignedTechnician = request.assigned_technician_id === profile.id;
   const status = request.status as string;
 
   // A transition shows up if the current user's role is explicitly allowed,
@@ -249,6 +271,7 @@ export default async function RequestDetailPage({
   const visibleTransitions = availableTransitions.filter((t) => {
     if (status === "submitted" && t.to_key === "under_review") return false;
     if (status === "completed" && t.to_key === "closed") return false;
+    if (t.from_key === "on_site" && t.to_key === "completed") return false;
     return profile.is_manager || t.allowed_roles.includes(profile.role);
   });
 
@@ -302,6 +325,11 @@ export default async function RequestDetailPage({
           {request.requestor?.full_name} on{" "}
           {format(parseISO(request.created_at), "MMM d, yyyy")}
         </p>
+        {request.assigned_technician?.full_name && (
+          <p className="text-sm text-slate-500 mt-0.5">
+            Technician: {request.assigned_technician.full_name}
+          </p>
+        )}
       </div>
 
       {/* Action bar — driven by the admin-configured workflow for this category */}
@@ -313,6 +341,9 @@ export default async function RequestDetailPage({
             category={request.category}
           />
         )}
+        {canAssignTechnician && (
+          <AssignTechnicianControl requestId={id} technicians={technicians} />
+        )}
         {visibleTransitions.map((t) => (
           <StatusButton
             key={t.id}
@@ -322,6 +353,14 @@ export default async function RequestDetailPage({
             variant={t.variant}
           />
         ))}
+        {isAssignedTechnician && status === "on_site" && (
+          <Link
+            href={`/requests/${id}/complete`}
+            className="rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 transition"
+          >
+            Mark Completed
+          </Link>
+        )}
         {isOwner && status === "returned_for_info" && (
           <Link
             href={`/requests/${id}/edit`}
@@ -339,6 +378,44 @@ export default async function RequestDetailPage({
           </Link>
         )}
       </div>
+
+      {closeoutRow?.signature_url && (
+        <section className="mb-8 bg-white border border-slate-200 rounded-xl p-5">
+          <h2 className="text-sm font-semibold text-slate-900 mb-3">Job completion</h2>
+          {closeoutRow.technician_notes && (
+            <p className="text-sm text-slate-700 whitespace-pre-wrap mb-4">
+              {closeoutRow.technician_notes}
+            </p>
+          )}
+          {closeoutRow.technician_photos?.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-4">
+              {closeoutRow.technician_photos.map((p, i) => (
+                <a
+                  key={i}
+                  href={p.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block w-20 h-20 rounded-md overflow-hidden border border-slate-200"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={p.url} alt={p.name} className="w-full h-full object-cover" />
+                </a>
+              ))}
+            </div>
+          )}
+          <div className="border border-slate-200 rounded-lg p-3 inline-block bg-slate-50">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={closeoutRow.signature_url} alt="Signature" className="h-20" />
+          </div>
+          <p className="text-xs text-slate-500 mt-2">
+            Signed by {closeoutRow.signed_by_name}
+            {closeoutRow.signed_by_role &&
+              ` (${SIGNED_BY_ROLE_LABELS[closeoutRow.signed_by_role] ?? closeoutRow.signed_by_role})`}
+            {closeoutRow.signed_at &&
+              ` · ${format(parseISO(closeoutRow.signed_at), "MMM d, yyyy 'at' h:mm a")}`}
+          </p>
+        </section>
+      )}
 
       {status === "completed" && canManageCloseout && (
         <div className="mb-8">
