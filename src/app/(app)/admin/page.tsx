@@ -7,7 +7,7 @@ import type { Profile, RoleRow, RoleRequestRow } from "@/lib/types";
 import { createRole, inviteUser, createUserDirectly } from "./actions";
 import {
   RoleAssignSelect,
-  DeleteRoleButton,
+  RoleTableRow,
   RoleRequestDecisionButtons,
   UserRowActions,
 } from "./actions-client";
@@ -106,34 +106,15 @@ export default async function AdminPage({
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {roleList.map((r) => (
-                  <tr key={r.name}>
-                    <td className="px-4 py-2.5">
-                      <p className="text-slate-900 font-medium">{r.label}</p>
-                      <p className="text-xs text-slate-400">{r.name}</p>
-                    </td>
-                    <td className="px-4 py-2.5 text-slate-600">{r.description ?? "—"}</td>
-                    <td className="px-4 py-2.5">
-                      {r.is_staff ? (
-                        <span className="text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
-                          Yes
-                        </span>
-                      ) : (
-                        <span className="text-xs text-slate-400">No</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-2.5">
-                      {r.is_manager ? (
-                        <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">
-                          Yes
-                        </span>
-                      ) : (
-                        <span className="text-xs text-slate-400">No</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-2.5 text-right">
-                      <DeleteRoleButton roleName={r.name} />
-                    </td>
-                  </tr>
+                  <RoleTableRow
+                    // Keyed on every editable field's value (not just
+                    // r.name) so a successful save remounts the row with
+                    // editing reset to false, while a rejected save (same
+                    // data, different error) leaves the edit form open.
+                    key={`${r.name}-${r.label}-${r.description}-${r.is_staff}-${r.is_manager}`}
+                    role={r}
+                    isOwnRole={r.name === profile.role}
+                  />
                 ))}
               </tbody>
             </table>
