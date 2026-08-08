@@ -32,7 +32,7 @@ export default function RequestsTable({
   const allSelected = requests.length > 0 && selected.size === requests.length;
   const someSelected = selected.size > 0 && !allSelected;
 
-  const colCount = 5 + (isStaff ? 1 : 0) + (isManager ? 1 : 0);
+  const colCount = 6 + (isStaff ? 1 : 0) + (isManager ? 1 : 0);
 
   const selectedList = useMemo(() => Array.from(selected), [selected]);
 
@@ -122,6 +122,7 @@ export default function RequestsTable({
               )}
               <th className="text-left px-4 py-3 font-medium">Request</th>
               <th className="text-left px-4 py-3 font-medium">Category</th>
+              <th className="text-left px-4 py-3 font-medium">Project</th>
               {isStaff && <th className="text-left px-4 py-3 font-medium">Requestor</th>}
               <th className="text-left px-4 py-3 font-medium">Priority</th>
               <th className="text-left px-4 py-3 font-medium">Status</th>
@@ -151,6 +152,9 @@ export default function RequestsTable({
                 </td>
                 <td className="px-4 py-3 text-slate-600">
                   {CATEGORY_LABELS[r.category as Category]}
+                </td>
+                <td className="px-4 py-3 text-slate-600">
+                  {r.linked_project?.name ?? r.project ?? "—"}
                 </td>
                 {isStaff && (
                   <td className="px-4 py-3 text-slate-600">

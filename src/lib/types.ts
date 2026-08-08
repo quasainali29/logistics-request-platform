@@ -117,6 +117,11 @@ export interface RequestRow {
   updated_at: string;
   requestor?: Profile;
   owner?: Profile;
+  // Populated only on the requests list query (a join alongside the plain
+  // `project_id`/`project` columns above) so the table can show a live
+  // project name without an extra query per row. Prefer this over the
+  // raw `project` text column when both are present.
+  linked_project?: { name: string } | null;
 }
 
 export interface AttachmentFile {

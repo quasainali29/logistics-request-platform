@@ -1,6 +1,6 @@
 import { getProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import { getWorkflowStages } from "@/lib/cachedLookups";
+import { getWorkflowStages, getActiveProjects } from "@/lib/cachedLookups";
 import Link from "next/link";
 import RequestsTable from "./RequestsTable";
 import RequestsFilterBar from "./RequestsFilterBar";
@@ -14,7 +14,7 @@ const PAGE_SIZE = 25;
 const PRIORITY_RANK: Record<string, number> = { urgent: 4, high: 3, medium: 2, low: 1 };
 
 const REQUEST_SELECT =
-  "*, requestor:profiles!requests_requestor_id_fkey(full_name), owner:profiles!requests_owner_id_fkey(full_name)";
+  "*, requestor:profiles!requests_requestor_id_fkey(full_name), owner:profiles!requests_owner_id_fkey(full_name), linked_project:projects!requests_project_id_fkey(name)";
 
 export default async function RequestsPage({
   searchParams,
@@ -22,6 +22,7 @@ export default async function RequestsPage({
   searchParams: Promise<{
     page?: string;
     category?: string;
+    project?: string;
     requestor?: string;
     priority?: string;
     status?: string;
@@ -37,6 +38,7 @@ export default async function RequestsPage({
   const to = from + PAGE_SIZE - 1;
 
   const category = params.category || "";
+  const projectId = params.project || "";
   const requestorId = params.requestor || "";
   const priority = params.priority || "";
   const status = params.status || "";
@@ -66,6 +68,7 @@ export default async function RequestsPage({
     let query = supabase.from("requests").select(REQUEST_SELECT, { count: "exact" });
     if (!isStaff) query = query.eq("requestor_id", profile.id);
     if (category) query = query.eq("category", category);
+    if (projectId) query = query.eq("project_id", projectId);
     if (isStaff && requestorId) query = query.eq("requestor_id", requestorId);
     if (priority) query = query.eq("priority", priority);
     if (status) query = query.eq("status", status);
@@ -90,6 +93,7 @@ export default async function RequestsPage({
     let query = supabase.from("requests").select(REQUEST_SELECT, { count: "exact" });
     if (!isStaff) query = query.eq("requestor_id", profile.id);
     if (category) query = query.eq("category", category);
+    if (projectId) query = query.eq("project_id", projectId);
     if (isStaff && requestorId) query = query.eq("requestor_id", requestorId);
     if (priority) query = query.eq("priority", priority);
     if (status) query = query.eq("status", status);
@@ -118,6 +122,9 @@ export default async function RequestsPage({
   // Requestor filter options -- staff only, since non-staff can only ever
   // see their own requests regardless of this filter (see withFilters
   // above), so the control would be a no-op for them.
+  const activeProjects = await getActiveProjects();
+  const projectOptions = activeProjects.map((p) => ({ id: p.id, name: p.name }));
+
   let requestorOptions: { id: string; full_name: string }[] = [];
   if (isStaff) {
     const { data: requestorRows } = await supabase
@@ -138,6 +145,7 @@ export default async function RequestsPage({
   function pageHref(p: number) {
     const sp = new URLSearchParams();
     if (category) sp.set("category", category);
+    if (projectId) sp.set("project", projectId);
     if (requestorId) sp.set("requestor", requestorId);
     if (priority) sp.set("priority", priority);
     if (status) sp.set("status", status);
@@ -176,6 +184,7 @@ export default async function RequestsPage({
         isStaff={isStaff}
         requestorOptions={requestorOptions}
         statusOptions={statusOptions}
+        projectOptions={projectOptions}
       />
 
       <RequestsTable

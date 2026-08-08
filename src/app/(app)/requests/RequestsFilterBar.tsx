@@ -24,10 +24,12 @@ export default function RequestsFilterBar({
   isStaff,
   requestorOptions,
   statusOptions,
+  projectOptions,
 }: {
   isStaff: boolean;
   requestorOptions: { id: string; full_name: string }[];
   statusOptions: { value: string; label: string }[];
+  projectOptions: { id: string; name: string }[];
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -76,6 +78,21 @@ export default function RequestsFilterBar({
             {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
               <option key={value} value={value}>
                 {label}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <Field label="Project">
+          <select
+            value={searchParams.get("project") ?? ""}
+            onChange={(e) => update("project", e.target.value)}
+            className="border border-slate-300 rounded-md px-2 py-1.5 text-sm text-slate-900 w-[150px]"
+          >
+            <option value="">All</option>
+            {projectOptions.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
               </option>
             ))}
           </select>
