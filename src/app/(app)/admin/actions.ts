@@ -7,6 +7,7 @@ import { getProfile } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
+import { PROTECTED_ROLE_KEYS } from "@/lib/roleConstants";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
@@ -88,6 +89,79 @@ export async function deleteRole(roleName: string) {
 
   if (error) {
     redirect(`/admin?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath("/admin");
+}
+
+// Edits an existing role in place, including (for non-protected roles)
+// renaming its internal key. Migration 018 adds ON UPDATE CASCADE to every
+// foreign key pointing at roles(name), so a key rename automatically
+// carries over to profiles.role, role_requests.requested_role, and
+// role_permissions.role_name instead of failing.
+export async function updateRole(originalName: string, formData: FormData) {
+  const { supabase, user } = await requireManager();
+
+  const label = (formData.get("label") as string)?.trim();
+  const description = (formData.get("description") as string)?.trim() || null;
+  const isStaff = formData.get("is_staff") === "on";
+  const isManagerFlag = formData.get("is_manager") === "on";
+
+  if (!label) {
+    redirect("/admin?error=A+display+name+is+required");
+  }
+
+  // Protected roles keep their internal key no matter what's submitted —
+  // enforced here rather than by disabling the field client-side, so it
+  // can't be bypassed, and so editing the display name for one of these
+  // roles never accidentally re-slugs into a changed key.
+  let name: string;
+  if (PROTECTED_ROLE_KEYS.includes(originalName)) {
+    name = originalName;
+  } else {
+    const rawName = ((formData.get("name") as string) || label).trim();
+    name = rawName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+    if (!name) {
+      redirect("/admin?error=Internal+key+is+required");
+    }
+  }
+
+  // Self-lockout guard: block removing Manager access from the role the
+  // acting user is themself currently assigned, so they can't accidentally
+  // lock themselves out of this Admin panel with no one else able to undo it.
+  const { data: actorProfile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  if (actorProfile?.role === originalName && !isManagerFlag) {
+    redirect(
+      `/admin?error=${encodeURIComponent(
+        "You can't remove Manager access from your own current role."
+      )}`
+    );
+  }
+
+  const { error } = await supabase
+    .from("roles")
+    .update({
+      name,
+      label,
+      description,
+      is_staff: isStaff || isManagerFlag, // managers are always staff too
+      is_manager: isManagerFlag,
+    })
+    .eq("name", originalName);
+
+  if (error) {
+    const friendly = /duplicate key|already exists/i.test(error.message)
+      ? "A role with that internal key already exists — try a different one."
+      : error.message;
+    redirect(`/admin?error=${encodeURIComponent(friendly)}`);
   }
 
   revalidatePath("/admin");
