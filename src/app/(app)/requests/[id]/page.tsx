@@ -475,14 +475,24 @@ export default async function RequestDetailPage({
             <section className="bg-white border border-slate-200 rounded-xl p-5">
               <div className="flex items-center justify-between gap-3 mb-3">
                 <h2 className="text-sm font-semibold text-slate-900">Maintenance details</h2>
-                {canGenerateFulfillmentDocs && (
-                  <a
-                    href={`/api/requests/${id}/maintenance-report`}
-                    className="text-xs text-[var(--accent)] underline whitespace-nowrap"
-                  >
-                    Generate maintenance form
-                  </a>
-                )}
+                <div className="flex items-center gap-3 flex-wrap">
+                  {canGenerateFulfillmentDocs && (
+                    <a
+                      href={`/api/requests/${id}/maintenance-report`}
+                      className="text-xs text-[var(--accent)] underline whitespace-nowrap"
+                    >
+                      Generate maintenance form
+                    </a>
+                  )}
+                  {canGenerateFulfillmentDocs && status === "closed" && (
+                    <a
+                      href={`/api/requests/${id}/closure-document`}
+                      className="text-xs text-[var(--accent)] underline whitespace-nowrap"
+                    >
+                      Download closure document (PDF)
+                    </a>
+                  )}
+                </div>
               </div>
               <dl className="space-y-2 text-sm mb-4">
                 <Row label="Location / area" value={maintenanceDetails.location_area ?? "—"} />
@@ -552,14 +562,24 @@ export default async function RequestDetailPage({
             <section className="bg-white border border-slate-200 rounded-xl p-5">
               <div className="flex items-center justify-between gap-3 mb-3">
                 <h2 className="text-sm font-semibold text-slate-900">Delivery details</h2>
-                {canGenerateFulfillmentDocs && (
-                  <a
-                    href={`/api/requests/${id}/delivery-note`}
-                    className="text-xs text-[var(--accent)] underline whitespace-nowrap"
-                  >
-                    Generate delivery note
-                  </a>
-                )}
+                <div className="flex items-center gap-3 flex-wrap">
+                  {canGenerateFulfillmentDocs && (
+                    <a
+                      href={`/api/requests/${id}/delivery-note`}
+                      className="text-xs text-[var(--accent)] underline whitespace-nowrap"
+                    >
+                      Generate delivery note
+                    </a>
+                  )}
+                  {canGenerateFulfillmentDocs && status === "closed" && (
+                    <a
+                      href={`/api/requests/${id}/closure-document`}
+                      className="text-xs text-[var(--accent)] underline whitespace-nowrap"
+                    >
+                      Download closure document (PDF)
+                    </a>
+                  )}
+                </div>
               </div>
               <dl className="space-y-2 text-sm mb-4">
                 <Row label="Delivery location" value={deliveryDetails.delivery_location ?? "—"} />
@@ -652,14 +672,24 @@ export default async function RequestDetailPage({
                   <h2 className="text-sm font-semibold text-slate-900">
                     Procurement details
                   </h2>
-                  {canGenerateFulfillmentDocs && (
-                    <a
-                      href={`/api/requests/${id}/purchase-requisition`}
-                      className="text-xs text-[var(--accent)] underline whitespace-nowrap"
-                    >
-                      Generate purchase requisition
-                    </a>
-                  )}
+                  <div className="flex items-center gap-3 flex-wrap">
+                    {canGenerateFulfillmentDocs && (
+                      <a
+                        href={`/api/requests/${id}/purchase-requisition`}
+                        className="text-xs text-[var(--accent)] underline whitespace-nowrap"
+                      >
+                        Generate purchase requisition
+                      </a>
+                    )}
+                    {canGenerateFulfillmentDocs && status === "closed" && (
+                      <a
+                        href={`/api/requests/${id}/closure-document`}
+                        className="text-xs text-[var(--accent)] underline whitespace-nowrap"
+                      >
+                        Download closure document (PDF)
+                      </a>
+                    )}
+                  </div>
                 </div>
 
                 {procurementDetails && (
@@ -745,14 +775,24 @@ export default async function RequestDetailPage({
             <section className="bg-white border border-slate-200 rounded-xl p-5">
               <div className="flex items-center justify-between gap-3 mb-3">
                 <h2 className="text-sm font-semibold text-slate-900">Labor details</h2>
-                {canGenerateFulfillmentDocs && (
-                  <a
-                    href={`/api/requests/${id}/labor-deployment-sheet`}
-                    className="text-xs text-[var(--accent)] underline whitespace-nowrap"
-                  >
-                    Generate labor deployment sheet
-                  </a>
-                )}
+                <div className="flex items-center gap-3 flex-wrap">
+                  {canGenerateFulfillmentDocs && (
+                    <a
+                      href={`/api/requests/${id}/labor-deployment-sheet`}
+                      className="text-xs text-[var(--accent)] underline whitespace-nowrap"
+                    >
+                      Generate labor deployment sheet
+                    </a>
+                  )}
+                  {canGenerateFulfillmentDocs && status === "closed" && (
+                    <a
+                      href={`/api/requests/${id}/closure-document`}
+                      className="text-xs text-[var(--accent)] underline whitespace-nowrap"
+                    >
+                      Download closure document (PDF)
+                    </a>
+                  )}
+                </div>
               </div>
               <div className="overflow-hidden border border-slate-200 rounded-lg">
                 <table className="w-full text-sm">
