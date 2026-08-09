@@ -1428,51 +1428,27 @@ export async function closeRequestWithDocuments(requestId: string, formData: For
   }
 
   const category = request.category as string;
+  // Delivery, maintenance and procurement no longer collect any documents
+  // or manual fields here -- proof of completion is the technician's
+  // photos and signature (request_closeouts.technician_photos /
+  // signature_url, written by technicianCompleteJob), reviewed via the Job
+  // completion panel before this form is ever shown. This closeoutRow is
+  // now just a marker of who closed the request; historical rows from
+  // before this change keep whatever documents they already have.
   const closeoutRow: Record<string, unknown> = { request_id: requestId, closed_by: user.id };
 
-  if (category === "delivery") {
-    const deliveryLocation = (formData.get("delivery_location") as string)?.trim();
-    const noteFile = formData.get("delivery_note") as File | null;
-    const note =
-      noteFile && noteFile.size > 0
-        ? await uploadOne(supabase, `closeout/${requestId}`, noteFile)
-        : null;
-
-    if (!deliveryLocation || !note) {
-      redirect(
-        `/requests/${requestId}?error=${encodeURIComponent(
-          "Delivery note and delivery location are required to close this request."
-        )}`
-      );
-    }
-
-    closeoutRow.delivery_note = note;
-    closeoutRow.delivery_location = deliveryLocation;
-  } else if (category === "labor") {
-    const sheetFile = formData.get("labor_sheet") as File | null;
-    const sheet =
-      sheetFile && sheetFile.size > 0
-        ? await uploadOne(supabase, `closeout/${requestId}`, sheetFile)
-        : null;
-
-    if (!sheet) {
-      redirect(
-        `/requests/${requestId}?error=${encodeURIComponent(
-          "A labor sheet is required to close this request."
-        )}`
-      );
-    }
-    closeoutRow.labor_sheet = sheet;
-
-    const types = formData.getAll("cost_type[]") as string[];
-    const qtys = formData.getAll("cost_qty[]") as string[];
-    const costs = formData.getAll("cost_rate[]") as string[];
+  if (category === "labor") {
+    // Personnel actually deployed, confirmed/adjusted by the coordinator --
+    // kept separate from request_cost_lines below, which is the one place
+    // dollar amounts are entered for every category (see parseCostLines).
+    const types = formData.getAll("personnel_type[]") as string[];
+    const qtys = formData.getAll("personnel_qty[]") as string[];
     const lines = types
       .map((t, i) => ({
         request_id: requestId,
         personnel_type: (t || "").trim(),
         quantity: parseInt(qtys[i] || "1", 10) || 1,
-        cost_per_labor: parseFloat(costs[i] || "0") || 0,
+        cost_per_labor: 0,
       }))
       .filter((l) => l.personnel_type);
 
@@ -1480,52 +1456,6 @@ export async function closeRequestWithDocuments(requestId: string, formData: For
     if (lines.length > 0) {
       await supabase.from("labor_closeout_lines").insert(lines);
     }
-  } else if (category === "maintenance") {
-    const formFile = formData.get("maintenance_form") as File | null;
-    const signedForm =
-      formFile && formFile.size > 0
-        ? await uploadOne(supabase, `closeout/${requestId}`, formFile)
-        : null;
-    const photoFiles = (formData.getAll("maintenance_photos") as File[]).filter(
-      (f) => f && f.size > 0
-    );
-
-    if (!signedForm || photoFiles.length === 0) {
-      redirect(
-        `/requests/${requestId}?error=${encodeURIComponent(
-          "A signed maintenance form and at least one photo are required to close this request."
-        )}`
-      );
-    }
-
-    const photos = await uploadMany(supabase, `closeout/${requestId}`, photoFiles);
-    closeoutRow.maintenance_form = signedForm;
-    closeoutRow.maintenance_photos = photos;
-  } else if (category === "procurement") {
-    const invoiceFile = formData.get("invoice") as File | null;
-    const invoice =
-      invoiceFile && invoiceFile.size > 0
-        ? await uploadOne(supabase, `closeout/${requestId}`, invoiceFile)
-        : null;
-    const photoFiles = (formData.getAll("procurement_photos") as File[]).filter(
-      (f) => f && f.size > 0
-    );
-    const deliveryLocation = (formData.get("delivery_location") as string)?.trim();
-    const totalValueRaw = formData.get("total_value") as string;
-
-    if (!invoice || photoFiles.length === 0 || !deliveryLocation) {
-      redirect(
-        `/requests/${requestId}?error=${encodeURIComponent(
-          "An invoice, at least one item photo, and a delivery location are required to close this request."
-        )}`
-      );
-    }
-
-    const photos = await uploadMany(supabase, `closeout/${requestId}`, photoFiles);
-    closeoutRow.invoice = invoice;
-    closeoutRow.procurement_photos = photos;
-    closeoutRow.delivery_location = deliveryLocation;
-    closeoutRow.total_value = parseFloat(totalValueRaw || "0") || 0;
   }
 
   const { error: upsertError } = await supabase

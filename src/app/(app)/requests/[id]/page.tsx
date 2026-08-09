@@ -175,15 +175,15 @@ export default async function RequestDetailPage({
     .order("full_name", { ascending: true });
   const commentUsers = mentionableProfiles ?? [];
 
-  // Pre-populate the labor closeout cost table from the original request's
-  // personnel lines the first time the coordinator opens the closeout form.
-  let laborSeedLines: { personnel_type: string; quantity: number; cost_per_labor: number }[] = [];
+  // Pre-populate the labor closeout's "Personnel deployed" table from the
+  // original request's personnel lines the first time the coordinator
+  // opens the closeout form.
+  let laborSeedLines: { personnel_type: string; quantity: number }[] = [];
   if (request.category === "labor" && request.status === "completed") {
     if (laborCloseoutLines && laborCloseoutLines.length > 0) {
       laborSeedLines = (laborCloseoutLines as LaborCloseoutLine[]).map((l) => ({
         personnel_type: l.personnel_type,
         quantity: l.quantity,
-        cost_per_labor: l.cost_per_labor,
       }));
     } else {
       const { data: originalLines } = await supabase
@@ -193,7 +193,6 @@ export default async function RequestDetailPage({
       laborSeedLines = (originalLines ?? []).map((l) => ({
         personnel_type: l.personnel_type,
         quantity: l.quantity,
-        cost_per_labor: 0,
       }));
     }
   }
@@ -870,7 +869,7 @@ export default async function RequestDetailPage({
                 (laborCloseoutLines as LaborCloseoutLine[] | null)?.length ? (
                 <div className="mt-4">
                   <h3 className="text-xs font-semibold text-slate-500 mb-2 uppercase">
-                    Cost breakdown
+                    Personnel deployed
                   </h3>
                   <div className="overflow-hidden border border-slate-200 rounded-lg">
                     <table className="w-full text-sm">
@@ -878,8 +877,6 @@ export default async function RequestDetailPage({
                         <tr>
                           <th className="text-left px-3 py-2 font-medium">Type of Labor</th>
                           <th className="text-left px-3 py-2 font-medium">Quantity</th>
-                          <th className="text-left px-3 py-2 font-medium">Cost/Labor</th>
-                          <th className="text-left px-3 py-2 font-medium">Total value</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -887,12 +884,6 @@ export default async function RequestDetailPage({
                           <tr key={l.id}>
                             <td className="px-3 py-2 text-slate-900">{l.personnel_type}</td>
                             <td className="px-3 py-2 text-slate-700">{l.quantity}</td>
-                            <td className="px-3 py-2 text-slate-700">
-                              {l.cost_per_labor.toFixed(2)}
-                            </td>
-                            <td className="px-3 py-2 text-slate-900 font-medium">
-                              {l.total_value.toFixed(2)}
-                            </td>
                           </tr>
                         ))}
                       </tbody>
