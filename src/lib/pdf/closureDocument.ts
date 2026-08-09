@@ -68,8 +68,11 @@ export interface ClosureDocConfig {
   costLines: CostLine[];
   photos: FetchedImage[];
   signOff: SignOff | null;
-  legacySignatureRoles: [string, string]; // the two pre-existing blank sign lines
-  acknowledgementNote: string;
+  // A short confirmation sentence shown directly under the captured
+  // signature -- e.g. "This is to confirm the above work has been carried
+  // out...". Replaces the old pre-printed blank "Name/Date" signature
+  // lines entirely, since the real signature is already captured above it.
+  closingNote: string;
 }
 
 // Fetches a remote image (Supabase Storage URL) and returns bytes + a
@@ -385,7 +388,7 @@ class Cursor {
     }
   }
 
-  async signOffBlock(signOff: SignOff | null) {
+  async signOffBlock(signOff: SignOff | null, closingNote: string) {
     this.sectionTitle("Completion sign-off", "new");
     if (!signOff) {
       this.ensure(14);
@@ -397,6 +400,7 @@ class Cursor {
         color: MUTED,
       });
       this.y -= 20;
+      this.closingNote(closingNote);
       return;
     }
     const boxH = 60;
@@ -433,43 +437,21 @@ class Cursor {
     this.y -= boxH + 14;
     const caption = `Signed by ${signOff.signedByName} (${signOff.signedByRole}) · ${signOff.signedAt}`;
     this.page.drawText(caption, { x: MARGIN, y: this.y, size: 9, font: this.font, color: MUTED });
-    this.y -= 20;
+    this.y -= 16;
+    this.closingNote(closingNote);
   }
 
-  legacySignatures(roles: [string, string]) {
-    const colW = CONTENT_WIDTH / 2 - 10;
-    this.ensure(50);
-    roles.forEach((role, idx) => {
-      const x = MARGIN + idx * (colW + 20);
-      this.page.drawLine({
-        start: { x, y: this.y },
-        end: { x: x + colW, y: this.y },
-        thickness: 0.5,
-        color: LINE,
-      });
-      this.page.drawText(`${role}'s signature`, {
-        x,
-        y: this.y - 12,
-        size: 9,
-        font: this.bold,
-        color: MUTED,
-      });
-      this.page.drawText("Name: ____________________", {
-        x,
-        y: this.y - 26,
-        size: 9,
-        font: this.font,
-        color: MUTED,
-      });
-      this.page.drawText("Date: ____________________", {
-        x,
-        y: this.y - 40,
-        size: 9,
-        font: this.font,
-        color: MUTED,
-      });
+  // A short confirmation sentence directly under the sign-off -- no
+  // heading, no blank Name/Date lines below it. The real signature above
+  // already covers what those used to be for.
+  closingNote(text: string) {
+    const lines = wrap(text, this.font, 9, CONTENT_WIDTH);
+    lines.forEach((line) => {
+      this.ensure(12);
+      this.page.drawText(line, { x: MARGIN, y: this.y, size: 9, font: this.font, color: MUTED });
+      this.y -= 12;
     });
-    this.y -= 54;
+    this.y -= 8;
   }
 }
 
@@ -527,17 +509,7 @@ export async function renderClosureDocument(config: ClosureDocConfig): Promise<B
 
   cursor.costTable(config.costLines);
   cursor.photosGrid(config.photos);
-  await cursor.signOffBlock(config.signOff);
-
-  cursor.sectionTitle("Acknowledgement");
-  cursor.ensure(16);
-  const lines = wrap(config.acknowledgementNote, cursor.font, 9, CONTENT_WIDTH);
-  lines.forEach((line) => {
-    cursor.page.drawText(line, { x: MARGIN, y: cursor.y, size: 9, font: cursor.font, color: MUTED });
-    cursor.y -= 12;
-  });
-  cursor.y -= 10;
-  cursor.legacySignatures(config.legacySignatureRoles);
+  await cursor.signOffBlock(config.signOff, config.closingNote);
 
   const bytes = await doc.save();
   return Buffer.from(bytes);

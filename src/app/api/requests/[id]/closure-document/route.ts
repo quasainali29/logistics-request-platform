@@ -138,8 +138,6 @@ export async function GET(
     : request.project ?? "—";
 
   const generatedDate = format(new Date(), "MMM d, yyyy");
-  const acknowledgementNote =
-    "This closure document was generated automatically when the request was closed, using the completion photos, signature and costs recorded on the platform.";
 
   let config: ClosureDocConfig;
 
@@ -179,8 +177,8 @@ export async function GET(
       costLines,
       photos,
       signOff,
-      legacySignatureRoles: ["Driver", "Receiver"],
-      acknowledgementNote,
+      closingNote:
+        "This is to confirm that the above items have been delivered and received in good condition, unless otherwise noted above.",
     };
   } else if (request.category === "maintenance") {
     const { data: maintenanceDetails } = await supabase
@@ -212,8 +210,7 @@ export async function GET(
       costLines,
       photos,
       signOff,
-      legacySignatureRoles: ["Maintenance Team", "Site Incharge"],
-      acknowledgementNote:
+      closingNote:
         "This is to confirm that the above maintenance work has been carried out and inspected, unless otherwise noted above.",
     };
   } else if (request.category === "labor") {
@@ -259,8 +256,8 @@ export async function GET(
       costLines,
       photos,
       signOff,
-      legacySignatureRoles: ["Labor Team", "Site Incharge"],
-      acknowledgementNote,
+      closingNote:
+        "This is to confirm that the above labor deployment has been completed as described, unless otherwise noted above.",
     };
   } else if (request.category === "procurement") {
     const [{ data: procurementDetails }, { data: items }] = await Promise.all([
@@ -308,8 +305,8 @@ export async function GET(
       costLines,
       photos,
       signOff,
-      legacySignatureRoles: ["Procurement Officer", "Finance Approval"],
-      acknowledgementNote,
+      closingNote:
+        "This is to confirm that the above items have been procured and received, unless otherwise noted above.",
     };
   } else {
     return NextResponse.json({ error: "Unsupported request category." }, { status: 400 });
