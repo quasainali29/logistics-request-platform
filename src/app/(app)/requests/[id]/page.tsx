@@ -21,6 +21,7 @@ import {
   type LaborLine,
   type RequestCloseout,
   type LaborCloseoutLine,
+  type RequestCostLine,
   SIGNED_BY_ROLE_LABELS,
 } from "@/lib/types";
 import { getWorkflowStages } from "@/lib/cachedLookups";
@@ -33,6 +34,7 @@ import {
   UnassignTechnicianControl,
 } from "./actions-client";
 import { CloseoutForm } from "./CloseoutForm";
+import { CostBreakdownManager } from "./CostBreakdownManager";
 import { format, parseISO } from "date-fns";
 import { notFound } from "next/navigation";
 import Link from "next/link";
@@ -127,6 +129,7 @@ export default async function RequestDetailPage({
     { data: transitions },
     { data: closeout },
     { data: laborCloseoutLines },
+    { data: costLines },
   ] = await Promise.all([
     supabase
       .from("comments")
@@ -147,6 +150,11 @@ export default async function RequestDetailPage({
       .order("sort_order", { ascending: true }),
     supabase.from("request_closeouts").select("*").eq("request_id", id).maybeSingle(),
     supabase.from("labor_closeout_lines").select("*").eq("request_id", id),
+    supabase
+      .from("request_cost_lines")
+      .select("*")
+      .eq("request_id", id)
+      .order("created_at", { ascending: true }),
   ]);
 
   // workflow_stages is cached across all categories; narrow to this
@@ -465,6 +473,16 @@ export default async function RequestDetailPage({
             requestId={id}
             category={request.category}
             laborLines={request.category === "labor" ? laborSeedLines : undefined}
+          />
+        </div>
+      )}
+
+      {status === "closed" && (
+        <div className="mb-8">
+          <CostBreakdownManager
+            requestId={id}
+            lines={(costLines ?? []) as RequestCostLine[]}
+            canEdit={!!profile.is_manager}
           />
         </div>
       )}
