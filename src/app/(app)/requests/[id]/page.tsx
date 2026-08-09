@@ -25,7 +25,13 @@ import {
 } from "@/lib/types";
 import { getWorkflowStages } from "@/lib/cachedLookups";
 import { can } from "@/lib/permissions";
-import { StatusButton, CommentBox, ApproveRejectControls, AssignTechnicianControl } from "./actions-client";
+import {
+  StatusButton,
+  CommentBox,
+  ApproveRejectControls,
+  AssignTechnicianControl,
+  UnassignTechnicianControl,
+} from "./actions-client";
 import { CloseoutForm } from "./CloseoutForm";
 import { format, parseISO } from "date-fns";
 import { notFound } from "next/navigation";
@@ -160,25 +166,6 @@ export default async function RequestDetailPage({
     coordinators = coords ?? [];
   }
 
-  // Only offered once the coordinator already owns the request and no
-  // technician has been picked yet -- reassigning afterward isn't
-  // supported by this first pass, matching how "Assign to coordinator"
-  // above is also a one-time action.
-  let technicians: { id: string; full_name: string }[] = [];
-  const canAssignTechnician =
-    can(profile, "assign_technician") &&
-    request.status === "under_process" &&
-    !request.assigned_technician_id;
-  if (canAssignTechnician) {
-    const { data: techs } = await supabase
-      .from("profiles")
-      .select("id, full_name")
-      .eq("role", "technician")
-      .eq("status", "active")
-      .order("full_name", { ascending: true });
-    technicians = techs ?? [];
-  }
-
   // The @mention picker in Comments lists every active account across all
   // roles and departments — intentionally not scoped to logistics staff.
   const { data: mentionableProfiles } = await supabase
@@ -297,6 +284,30 @@ export default async function RequestDetailPage({
     !currentStage?.is_terminal &&
     !(isOwner && status === "returned_for_info");
 
+  // A technician can be assigned once the request is under a coordinator's
+  // care, and reassigned/unassigned any time after that up until the
+  // category's terminal stage -- same window as canManagerEditRequest's
+  // "still active" check, so the buttons appear/disappear together.
+  const hasTechnician = !!request.assigned_technician_id;
+  const canManageAssignment =
+    can(profile, "assign_technician") &&
+    status !== "submitted" &&
+    !currentStage?.is_terminal &&
+    status !== "completed";
+  const canAssignTechnician = canManageAssignment && !hasTechnician;
+  const canReassignTechnician = canManageAssignment && hasTechnician;
+
+  let technicians: { id: string; full_name: string }[] = [];
+  if (canAssignTechnician || canReassignTechnician) {
+    const { data: techs } = await supabase
+      .from("profiles")
+      .select("id, full_name")
+      .eq("role", "technician")
+      .eq("status", "active")
+      .order("full_name", { ascending: true });
+    technicians = techs ?? [];
+  }
+
   return (
     <div className="p-8 max-w-4xl">
       <div className="mb-6">
@@ -342,7 +353,7 @@ export default async function RequestDetailPage({
           />
         )}
         {canAssignTechnician && (
-          <AssignTechnicianControl requestId={id} technicians={technicians} />
+          <AssignTechnicianControl requestId={id} technicians={technicians} mode="assign" />
         )}
         {visibleTransitions.map((t) => (
           <StatusButton
@@ -368,6 +379,20 @@ export default async function RequestDetailPage({
           >
             Edit &amp; Resubmit
           </Link>
+        )}
+        {canReassignTechnician && (
+          <AssignTechnicianControl
+            requestId={id}
+            technicians={technicians}
+            mode="reassign"
+            currentTechnicianName={request.assigned_technician?.full_name ?? null}
+          />
+        )}
+        {canReassignTechnician && (
+          <UnassignTechnicianControl
+            requestId={id}
+            currentTechnicianName={request.assigned_technician?.full_name ?? null}
+          />
         )}
         {canManagerEditRequest && (
           <Link

@@ -7,6 +7,7 @@ import {
   approveAndAssignRequest,
   rejectRequest,
   assignTechnician,
+  unassignTechnician,
 } from "../actions";
 
 export function StatusButton({
@@ -189,13 +190,19 @@ export function ApproveRejectControls({
 export function AssignTechnicianControl({
   requestId,
   technicians,
+  mode = "assign",
+  currentTechnicianName = null,
 }: {
   requestId: string;
   technicians: { id: string; full_name: string }[];
+  mode?: "assign" | "reassign";
+  currentTechnicianName?: string | null;
 }) {
   const [pending, startTransition] = useTransition();
   const [showAssign, setShowAssign] = useState(false);
   const [technicianId, setTechnicianId] = useState("");
+
+  const isReassign = mode === "reassign";
 
   function handleAssign() {
     if (!technicianId) return;
@@ -211,20 +218,34 @@ export function AssignTechnicianControl({
         type="button"
         disabled={pending}
         onClick={() => setShowAssign(true)}
-        className="rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 transition disabled:opacity-50"
+        className={
+          isReassign
+            ? "rounded-md px-4 py-2 text-sm font-medium border border-slate-300 text-slate-700 hover:bg-slate-50 transition disabled:opacity-50"
+            : "rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 transition disabled:opacity-50"
+        }
       >
-        Assign Technician
+        {isReassign ? "Reassign Technician" : "Assign Technician"}
       </button>
 
       {showAssign && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl p-6 w-full max-w-sm">
             <h3 className="text-sm font-semibold text-slate-900 mb-1">
-              Assign a technician
+              {isReassign ? "Reassign to a different technician" : "Assign a technician"}
             </h3>
             <p className="text-xs text-slate-500 mb-3">
-              This request will move to &ldquo;Assigned&rdquo; and the selected
-              technician will be notified by email to accept the job.
+              {isReassign ? (
+                <>
+                  {currentTechnicianName ? `${currentTechnicianName} will be removed from this job. ` : ""}
+                  The request moves back to &ldquo;Assigned&rdquo; and the newly
+                  selected technician will be notified by email to accept the job.
+                </>
+              ) : (
+                <>
+                  This request will move to &ldquo;Assigned&rdquo; and the selected
+                  technician will be notified by email to accept the job.
+                </>
+              )}
             </p>
             <select
               value={technicianId}
@@ -252,7 +273,68 @@ export function AssignTechnicianControl({
                 onClick={handleAssign}
                 className="rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
               >
-                {pending ? "Assigning…" : "Confirm & Assign"}
+                {pending ? "Assigning…" : isReassign ? "Confirm & Reassign" : "Confirm & Assign"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+export function UnassignTechnicianControl({
+  requestId,
+  currentTechnicianName = null,
+}: {
+  requestId: string;
+  currentTechnicianName?: string | null;
+}) {
+  const [pending, startTransition] = useTransition();
+  const [showConfirm, setShowConfirm] = useState(false);
+
+  function handleUnassign() {
+    startTransition(() => {
+      unassignTechnician(requestId);
+      setShowConfirm(false);
+    });
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        disabled={pending}
+        onClick={() => setShowConfirm(true)}
+        className="rounded-md px-4 py-2 text-sm font-medium border border-red-300 text-red-600 hover:bg-red-50 transition disabled:opacity-50"
+      >
+        Unassign Technician
+      </button>
+
+      {showConfirm && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 w-full max-w-sm">
+            <h3 className="text-sm font-semibold text-slate-900 mb-1">
+              Remove {currentTechnicianName ?? "this technician"} from this job?
+            </h3>
+            <p className="text-xs text-slate-500 mb-4">
+              The request moves back to &ldquo;Team Assigned&rdquo;. No email is sent.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowConfirm(false)}
+                className="rounded-md px-4 py-2 text-sm font-medium bg-white border border-slate-300 text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={pending}
+                onClick={handleUnassign}
+                className="rounded-md px-4 py-2 text-sm font-medium bg-red-600 text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {pending ? "Removing…" : "Unassign"}
               </button>
             </div>
           </div>

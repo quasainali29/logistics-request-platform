@@ -1143,6 +1143,46 @@ export async function assignTechnician(requestId: string, technicianId: string) 
   revalidatePath("/requests");
 }
 
+// Coordinator/manager pulls a technician off a job -- e.g. they're
+// unavailable or the wrong person was picked. No email is sent (unlike
+// assignTechnician above) since there's no one left to notify; the job
+// simply drops back to "Team Assigned" until someone is assigned again.
+export async function unassignTechnician(requestId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { data: actor } = await supabase
+    .from("profiles")
+    .select("role, role_info:roles!profiles_role_fkey(is_manager)")
+    .eq("id", user.id)
+    .single();
+
+  const isManager = !!(actor?.role_info as unknown as { is_manager: boolean } | null)?.is_manager;
+  const canAssign = isManager || actor?.role === "logistics_coordinator";
+  if (!canAssign) {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "You don't have permission to unassign a technician."
+      )}`
+    );
+  }
+
+  const { error } = await supabase
+    .from("requests")
+    .update({ assigned_technician_id: null, status: "under_process" })
+    .eq("id", requestId);
+
+  if (error) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath(`/requests/${requestId}`);
+  revalidatePath("/requests");
+}
+
 // The technician's "Mark Completed" submission from the mobile flow at
 // /requests/[id]/complete -- uploads photos and the on-screen signature,
 // writes them to request_closeouts alongside the signer's name/role, and
