@@ -405,39 +405,57 @@ export default async function RequestDetailPage({
 
       {closeoutRow?.signature_url && (
         <section className="mb-8 bg-white border border-slate-200 rounded-xl p-5">
-          <h2 className="text-sm font-semibold text-slate-900 mb-3">Job completion</h2>
-          {closeoutRow.technician_notes && (
-            <p className="text-sm text-slate-700 whitespace-pre-wrap mb-4">
-              {closeoutRow.technician_notes}
-            </p>
-          )}
-          {closeoutRow.technician_photos?.length > 0 && (
-            <div className="flex flex-wrap gap-2 mb-4">
-              {closeoutRow.technician_photos.map((p, i) => (
-                <a
-                  key={i}
-                  href={p.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="block w-20 h-20 rounded-md overflow-hidden border border-slate-200"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={p.url} alt={p.name} className="w-full h-full object-cover" />
-                </a>
-              ))}
+          <h2 className="text-sm font-semibold text-slate-900 mb-4">Job completion</h2>
+          <div className="grid md:grid-cols-2 gap-7">
+            <div>
+              {closeoutRow.technician_notes && (
+                <>
+                  <h3 className="text-xs font-semibold text-slate-500 uppercase mb-1.5">
+                    Notes
+                  </h3>
+                  <p className="text-sm text-slate-700 whitespace-pre-wrap mb-5">
+                    {closeoutRow.technician_notes}
+                  </p>
+                </>
+              )}
+              <h3 className="text-xs font-semibold text-slate-500 uppercase mb-1.5">
+                Signature
+              </h3>
+              <div className="border border-slate-200 rounded-lg p-3 inline-block bg-slate-50 mb-2">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={closeoutRow.signature_url} alt="Signature" className="h-20" />
+              </div>
+              <p className="text-xs text-slate-500">
+                Signed by {closeoutRow.signed_by_name}
+                {closeoutRow.signed_by_role &&
+                  ` (${SIGNED_BY_ROLE_LABELS[closeoutRow.signed_by_role] ?? closeoutRow.signed_by_role})`}
+                {closeoutRow.signed_at &&
+                  ` · ${format(parseISO(closeoutRow.signed_at), "MMM d, yyyy 'at' h:mm a")}`}
+              </p>
             </div>
-          )}
-          <div className="border border-slate-200 rounded-lg p-3 inline-block bg-slate-50">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={closeoutRow.signature_url} alt="Signature" className="h-20" />
+
+            {closeoutRow.technician_photos?.length > 0 && (
+              <div>
+                <h3 className="text-xs font-semibold text-slate-500 uppercase mb-1.5">
+                  Photos
+                </h3>
+                <div className="grid grid-cols-3 gap-2.5">
+                  {closeoutRow.technician_photos.map((p, i) => (
+                    <a
+                      key={i}
+                      href={p.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block aspect-square rounded-lg overflow-hidden border border-slate-200"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={p.url} alt={p.name} className="w-full h-full object-cover" />
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
-          <p className="text-xs text-slate-500 mt-2">
-            Signed by {closeoutRow.signed_by_name}
-            {closeoutRow.signed_by_role &&
-              ` (${SIGNED_BY_ROLE_LABELS[closeoutRow.signed_by_role] ?? closeoutRow.signed_by_role})`}
-            {closeoutRow.signed_at &&
-              ` · ${format(parseISO(closeoutRow.signed_at), "MMM d, yyyy 'at' h:mm a")}`}
-          </p>
         </section>
       )}
 
