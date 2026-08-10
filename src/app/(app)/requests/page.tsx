@@ -220,12 +220,14 @@ export default async function RequestsPage({
             )}
           </p>
         </div>
-        <Link
-          href="/requests/new"
-          className="bg-[var(--accent)] text-white rounded-md px-4 py-2 text-sm font-medium hover:opacity-90 transition"
-        >
-          New Request
-        </Link>
+        {!isTechnician && (
+          <Link
+            href="/requests/new"
+            className="bg-[var(--accent)] text-white rounded-md px-4 py-2 text-sm font-medium hover:opacity-90 transition"
+          >
+            New Request
+          </Link>
+        )}
       </div>
 
       <RequestsFilterBar

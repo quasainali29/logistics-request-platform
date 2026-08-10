@@ -1,7 +1,16 @@
 import RequestForm from "./RequestForm";
 import { getActiveProjects, getActiveDepartments } from "@/lib/cachedLookups";
+import { getProfile } from "@/lib/auth";
+import { redirect } from "next/navigation";
 
 export default async function NewRequestPage() {
+  const profile = await getProfile();
+  // Technicians work jobs assigned to them -- they never raise requests --
+  // so this route is a no-op for them even if they reach it directly.
+  if (profile.role === "technician") {
+    redirect("/requests");
+  }
+
   const [projects, departments] = await Promise.all([
     getActiveProjects(),
     getActiveDepartments(),
