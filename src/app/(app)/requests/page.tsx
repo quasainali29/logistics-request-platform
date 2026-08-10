@@ -30,6 +30,7 @@ export default async function RequestsPage({
     to?: string;
     due?: string;
     sort?: string;
+    search?: string;
   }>;
 }) {
   const params = await searchParams;
@@ -46,6 +47,7 @@ export default async function RequestsPage({
   const dateTo = params.to || "";
   const due = params.due || "";
   const sort = params.sort || "newest";
+  const search = (params.search || "").trim();
 
   const profile = await getProfile();
   const supabase = await createClient();
@@ -79,6 +81,7 @@ export default async function RequestsPage({
     if (isStaff && requestorId) query = query.eq("requestor_id", requestorId);
     if (priority) query = query.eq("priority", priority);
     if (status) query = query.eq("status", status);
+    if (search) query = query.ilike("request_number", `%${search}%`);
     if (dateFrom) query = query.gte("created_at", `${dateFrom}T00:00:00`);
     if (dateTo) query = query.lte("created_at", `${dateTo}T23:59:59`);
     if (due === "overdue") query = query.lt("date_required", today);
@@ -107,6 +110,7 @@ export default async function RequestsPage({
     if (isStaff && requestorId) query = query.eq("requestor_id", requestorId);
     if (priority) query = query.eq("priority", priority);
     if (status) query = query.eq("status", status);
+    if (search) query = query.ilike("request_number", `%${search}%`);
     if (dateFrom) query = query.gte("created_at", `${dateFrom}T00:00:00`);
     if (dateTo) query = query.lte("created_at", `${dateTo}T23:59:59`);
     if (due === "overdue") query = query.lt("date_required", today);
@@ -162,6 +166,7 @@ export default async function RequestsPage({
     if (dateFrom) sp.set("from", dateFrom);
     if (dateTo) sp.set("to", dateTo);
     if (due) sp.set("due", due);
+    if (search) sp.set("search", search);
     if (sort && sort !== "newest") sp.set("sort", sort);
     sp.set("page", String(p));
     return `/requests?${sp.toString()}`;

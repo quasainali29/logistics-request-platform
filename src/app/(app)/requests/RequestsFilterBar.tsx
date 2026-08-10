@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { CATEGORY_LABELS } from "@/lib/types";
 
@@ -34,6 +34,28 @@ export default function RequestsFilterBar({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const searchParamsString = searchParams.toString();
+
+  // Free-text search matches on request number only (e.g. "REQ-00093" or
+  // just "93"). Debounced rather than pushed on every keystroke -- each
+  // filter change here is a full server navigation, so firing one per
+  // character would be both slow and would keep yanking focus/cursor
+  // position as the page re-renders mid-type.
+  const [search, setSearch] = useState(searchParams.get("search") ?? "");
+
+  useEffect(() => {
+    setSearch(searchParams.get("search") ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParamsString]);
+
+  useEffect(() => {
+    const id = setTimeout(() => {
+      const current = searchParams.get("search") ?? "";
+      if (search.trim() !== current) update("search", search.trim());
+    }, 400);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
 
   function update(key: string, value: string) {
     const sp = new URLSearchParams(searchParams.toString());
@@ -50,6 +72,16 @@ export default function RequestsFilterBar({
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-3.5 mb-3">
       <div className="flex flex-wrap items-end gap-3">
+        <Field label="Search">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Request #"
+            className="border border-slate-300 rounded-md px-2 py-1.5 text-sm text-slate-900 w-[140px]"
+          />
+        </Field>
+
         <Field label="From">
           <input
             type="date"
