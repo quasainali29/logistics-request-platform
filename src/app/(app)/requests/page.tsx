@@ -14,7 +14,7 @@ const PAGE_SIZE = 25;
 const PRIORITY_RANK: Record<string, number> = { urgent: 4, high: 3, medium: 2, low: 1 };
 
 const REQUEST_SELECT =
-  "*, requestor:profiles!requests_requestor_id_fkey(full_name), owner:profiles!requests_owner_id_fkey(full_name), linked_project:projects!requests_project_id_fkey(name)";
+  "*, requestor:profiles!requests_requestor_id_fkey(full_name), owner:profiles!requests_owner_id_fkey(full_name), assigned_technician:profiles!requests_assigned_technician_id_fkey(full_name), linked_project:projects!requests_project_id_fkey(name)";
 
 export default async function RequestsPage({
   searchParams,
@@ -31,6 +31,8 @@ export default async function RequestsPage({
     due?: string;
     sort?: string;
     search?: string;
+    coordinator?: string;
+    technician?: string;
   }>;
 }) {
   const params = await searchParams;
@@ -48,6 +50,8 @@ export default async function RequestsPage({
   const due = params.due || "";
   const sort = params.sort || "newest";
   const search = (params.search || "").trim();
+  const coordinatorId = params.coordinator || "";
+  const technicianId = params.technician || "";
 
   const profile = await getProfile();
   const supabase = await createClient();
@@ -79,6 +83,8 @@ export default async function RequestsPage({
     if (category) query = query.eq("category", category);
     if (projectId) query = query.eq("project_id", projectId);
     if (isStaff && requestorId) query = query.eq("requestor_id", requestorId);
+    if (isStaff && coordinatorId) query = query.eq("owner_id", coordinatorId);
+    if (isStaff && technicianId) query = query.eq("assigned_technician_id", technicianId);
     if (priority) query = query.eq("priority", priority);
     if (status) query = query.eq("status", status);
     if (search) query = query.ilike("request_number", `%${search}%`);
@@ -108,6 +114,8 @@ export default async function RequestsPage({
     if (category) query = query.eq("category", category);
     if (projectId) query = query.eq("project_id", projectId);
     if (isStaff && requestorId) query = query.eq("requestor_id", requestorId);
+    if (isStaff && coordinatorId) query = query.eq("owner_id", coordinatorId);
+    if (isStaff && technicianId) query = query.eq("assigned_technician_id", technicianId);
     if (priority) query = query.eq("priority", priority);
     if (status) query = query.eq("status", status);
     if (search) query = query.ilike("request_number", `%${search}%`);
@@ -140,13 +148,32 @@ export default async function RequestsPage({
   const projectOptions = activeProjects.map((p) => ({ id: p.id, name: p.name }));
 
   let requestorOptions: { id: string; full_name: string }[] = [];
+  let coordinatorOptions: { id: string; full_name: string }[] = [];
+  let technicianOptions: { id: string; full_name: string }[] = [];
   if (isStaff) {
-    const { data: requestorRows } = await supabase
-      .from("profiles")
-      .select("id, full_name")
-      .eq("status", "active")
-      .order("full_name");
+    const [{ data: requestorRows }, { data: coordinatorRows }, { data: technicianRows }] =
+      await Promise.all([
+        supabase
+          .from("profiles")
+          .select("id, full_name")
+          .eq("status", "active")
+          .order("full_name"),
+        supabase
+          .from("profiles")
+          .select("id, full_name")
+          .eq("role", "logistics_coordinator")
+          .eq("status", "active")
+          .order("full_name"),
+        supabase
+          .from("profiles")
+          .select("id, full_name")
+          .eq("role", "technician")
+          .eq("status", "active")
+          .order("full_name"),
+      ]);
     requestorOptions = requestorRows ?? [];
+    coordinatorOptions = coordinatorRows ?? [];
+    technicianOptions = technicianRows ?? [];
   }
 
   // Status filter options -- deduped by key across every category's
@@ -161,6 +188,8 @@ export default async function RequestsPage({
     if (category) sp.set("category", category);
     if (projectId) sp.set("project", projectId);
     if (requestorId) sp.set("requestor", requestorId);
+    if (coordinatorId) sp.set("coordinator", coordinatorId);
+    if (technicianId) sp.set("technician", technicianId);
     if (priority) sp.set("priority", priority);
     if (status) sp.set("status", status);
     if (dateFrom) sp.set("from", dateFrom);
@@ -202,6 +231,8 @@ export default async function RequestsPage({
       <RequestsFilterBar
         isStaff={isStaff}
         requestorOptions={requestorOptions}
+        coordinatorOptions={coordinatorOptions}
+        technicianOptions={technicianOptions}
         statusOptions={statusOptions}
         projectOptions={projectOptions}
       />

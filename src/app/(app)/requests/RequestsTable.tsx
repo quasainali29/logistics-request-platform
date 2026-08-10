@@ -2,7 +2,8 @@
 
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { format, parseISO } from "date-fns";
+import { format, parseISO, isPast, isToday, differenceInCalendarDays } from "date-fns";
+import { AlertTriangle } from "lucide-react";
 import {
   formatStatusLabel,
   statusColor,
@@ -32,7 +33,21 @@ export default function RequestsTable({
   const allSelected = requests.length > 0 && selected.size === requests.length;
   const someSelected = selected.size > 0 && !allSelected;
 
-  const colCount = 6 + (isStaff ? 1 : 0) + (isManager ? 1 : 0);
+  const colCount = 8 + (isStaff ? 1 : 0) + (isManager ? 1 : 0);
+
+  // Same definition the dashboard's "Overdue" metric uses: due date has
+  // passed (not today), and the request hasn't reached a terminal stage
+  // for its category -- a closed/completed/rejected request is never
+  // flagged even if its due date is in the past.
+  function isOverdue(r: RequestRow) {
+    if (!r.date_required) return false;
+    const terminal =
+      stageList.find((s) => s.category === r.category && s.key === r.status)?.is_terminal ??
+      false;
+    if (terminal) return false;
+    const due = parseISO(r.date_required);
+    return isPast(due) && !isToday(due);
+  }
 
   const selectedList = useMemo(() => Array.from(selected), [selected]);
 
@@ -126,13 +141,18 @@ export default function RequestsTable({
               {isStaff && <th className="text-left px-4 py-3 font-medium">Requestor</th>}
               <th className="text-left px-4 py-3 font-medium">Priority</th>
               <th className="text-left px-4 py-3 font-medium">Status</th>
+              <th className="text-left px-4 py-3 font-medium">Assigned coordinator</th>
+              <th className="text-left px-4 py-3 font-medium">Assigned technician</th>
               <th className="text-left px-4 py-3 font-medium">Due</th>
               {isManager && <th className="text-left px-4 py-3 font-medium">Actions</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {requests.map((r) => (
-              <tr key={r.id} className="hover:bg-slate-50">
+              <tr
+                key={r.id}
+                className={`hover:bg-slate-50 ${isOverdue(r) ? "bg-red-50" : ""}`}
+              >
                 {isManager && (
                   <td className="px-4 py-3">
                     <input
@@ -180,14 +200,36 @@ export default function RequestsTable({
                   >
                     {formatStatusLabel(r.category, r.status, stageList)}
                   </span>
-                  {r.owner?.full_name && (
-                    <p className="text-xs text-slate-500 mt-1">
-                      Assigned to {r.owner.full_name}
-                    </p>
-                  )}
                 </td>
                 <td className="px-4 py-3 text-slate-600">
-                  {r.date_required ? format(parseISO(r.date_required), "MMM d, yyyy") : "—"}
+                  {r.owner?.full_name ?? <span className="text-slate-400">Not assigned</span>}
+                </td>
+                <td className="px-4 py-3 text-slate-600">
+                  {r.assigned_technician?.full_name ?? (
+                    <span className="text-slate-400">Not assigned</span>
+                  )}
+                </td>
+                <td className="px-4 py-3">
+                  {r.date_required ? (
+                    isOverdue(r) ? (
+                      <>
+                        <p className="text-red-600 font-medium flex items-center gap-1">
+                          <AlertTriangle className="w-3.5 h-3.5" />
+                          {format(parseISO(r.date_required), "MMM d, yyyy")}
+                        </p>
+                        <p className="text-xs text-red-600">
+                          {differenceInCalendarDays(new Date(), parseISO(r.date_required))} days
+                          overdue
+                        </p>
+                      </>
+                    ) : (
+                      <span className="text-slate-600">
+                        {format(parseISO(r.date_required), "MMM d, yyyy")}
+                      </span>
+                    )
+                  ) : (
+                    <span className="text-slate-600">—</span>
+                  )}
                 </td>
                 {isManager && (
                   <td className="px-4 py-3">

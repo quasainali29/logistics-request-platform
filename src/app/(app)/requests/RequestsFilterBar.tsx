@@ -23,11 +23,15 @@ const SORT_OPTIONS = [
 export default function RequestsFilterBar({
   isStaff,
   requestorOptions,
+  coordinatorOptions,
+  technicianOptions,
   statusOptions,
   projectOptions,
 }: {
   isStaff: boolean;
   requestorOptions: { id: string; full_name: string }[];
+  coordinatorOptions: { id: string; full_name: string }[];
+  technicianOptions: { id: string; full_name: string }[];
   statusOptions: { value: string; label: string }[];
   projectOptions: { id: string; name: string }[];
 }) {
@@ -141,6 +145,40 @@ export default function RequestsFilterBar({
               {requestorOptions.map((r) => (
                 <option key={r.id} value={r.id}>
                   {r.full_name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+
+        {isStaff && (
+          <Field label="Coordinator">
+            <select
+              value={searchParams.get("coordinator") ?? ""}
+              onChange={(e) => update("coordinator", e.target.value)}
+              className="border border-slate-300 rounded-md px-2 py-1.5 text-sm text-slate-900 w-[150px]"
+            >
+              <option value="">All</option>
+              {coordinatorOptions.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.full_name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+
+        {isStaff && (
+          <Field label="Technician">
+            <select
+              value={searchParams.get("technician") ?? ""}
+              onChange={(e) => update("technician", e.target.value)}
+              className="border border-slate-300 rounded-md px-2 py-1.5 text-sm text-slate-900 w-[150px]"
+            >
+              <option value="">All</option>
+              {technicianOptions.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.full_name}
                 </option>
               ))}
             </select>
