@@ -205,6 +205,107 @@ export default async function DashboardPage() {
     );
   }
 
+  // Coordinators only ever work requests that have been assigned to them
+  // (owner_id), same "dedicated dashboard" treatment as technicians above
+  // -- total/due-today/due-soon/completed-this-month, minus the Score card
+  // since that was only requested for technicians.
+  if (isCoordinator) {
+    const [{ data: myRequests }, stageList] = await Promise.all([
+      supabase
+        .from("requests")
+        .select(
+          "id, request_number, title, category, status, priority, date_required, updated_at"
+        )
+        .eq("owner_id", profile.id)
+        .order("date_required", { ascending: true, nullsFirst: false }),
+      getWorkflowStages(),
+    ]);
+
+    const myReqs = myRequests ?? [];
+    const isTerminal = (category: string, statusKey: string) =>
+      stageList.find((s) => s.category === category && s.key === statusKey)?.is_terminal ??
+      false;
+
+    const dueToday = myReqs.filter(
+      (r) => r.date_required && isToday(parseISO(r.date_required)) && !isTerminal(r.category, r.status)
+    );
+    const dueSoon = myReqs.filter(
+      (r) =>
+        r.date_required &&
+        !isTerminal(r.category, r.status) &&
+        !isToday(parseISO(r.date_required)) &&
+        isFuture(parseISO(r.date_required)) &&
+        differenceInCalendarDays(parseISO(r.date_required), new Date()) <= 7
+    );
+    const completedThisMonth = myReqs.filter((r) => {
+      if (!["completed", "closed"].includes(r.status)) return false;
+      const d = parseISO(r.updated_at);
+      const now = new Date();
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    });
+
+    const metrics = [
+      { label: "Total assigned", value: myReqs.length },
+      { label: "Due today", value: dueToday.length },
+      { label: "Due soon (7 days)", value: dueSoon.length },
+      { label: "Completed this month", value: completedThisMonth.length },
+    ];
+
+    return (
+      <div className="p-8 max-w-6xl">
+        <div className="mb-6">
+          <h1 className="text-xl font-semibold text-slate-900">My Dashboard</h1>
+          <p className="text-sm text-slate-500 mt-1">
+            Welcome back, {profile.full_name.split(" ")[0]}.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          {metrics.map((m) => (
+            <div key={m.label} className="bg-white border border-slate-200 rounded-xl p-4">
+              <p className="text-xs text-slate-500">{m.label}</p>
+              <p className="text-2xl font-semibold mt-1 text-slate-900">{m.value}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-xl p-5">
+          <h2 className="text-sm font-semibold text-slate-900 mb-3">Today's Requests</h2>
+          {dueToday.length === 0 ? (
+            <p className="text-sm text-slate-400">Nothing due today.</p>
+          ) : (
+            <ul className="space-y-2">
+              {dueToday.map((r) => (
+                <li key={r.id}>
+                  <Link
+                    href={`/requests/${r.id}`}
+                    className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-slate-50 border border-transparent hover:border-slate-200 transition"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm text-slate-900 truncate">{r.title}</p>
+                      <p className="text-xs text-slate-500">
+                        {r.request_number} · {CATEGORY_LABELS[r.category as keyof typeof CATEGORY_LABELS]}
+                      </p>
+                    </div>
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${statusColor(
+                        r.category,
+                        r.status,
+                        stageList
+                      )}`}
+                    >
+                      {formatStatusLabel(r.category, r.status, stageList)}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // Only select the columns the dashboard actually renders. Requestor/owner
   // names aren't shown anywhere on this page, so the joins that used to
   // pull them in were pure wasted payload on every single dashboard load.

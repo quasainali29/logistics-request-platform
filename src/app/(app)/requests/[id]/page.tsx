@@ -32,6 +32,8 @@ import {
   ApproveRejectControls,
   AssignTechnicianControl,
   UnassignTechnicianControl,
+  ReassignCoordinatorControl,
+  UnassignCoordinatorControl,
 } from "./actions-client";
 import { CloseoutForm } from "./CloseoutForm";
 import { CostBreakdownManager } from "./CostBreakdownManager";
@@ -161,10 +163,18 @@ export default async function RequestDetailPage({
   // request's category here instead of filtering it in the query itself.
   const stages = allStages.filter((s) => s.category === request.category);
 
-  // Coordinators for the Approve → Assign dropdown, only fetched for
-  // managers viewing a request that's still waiting on the approval gate.
+  // Coordinators for the Approve → Assign dropdown (managers reviewing a
+  // request still waiting on the approval gate) and for the Reassign
+  // Coordinator dropdown (managers changing the owner of an already-owned,
+  // still-active request) -- same options list, two different entry points.
+  const currentStageForOwner = stages.find((s) => s.key === request.status);
+  const canManageCoordinatorAssignment =
+    !!profile.is_manager && !!request.owner_id && !currentStageForOwner?.is_terminal;
   let coordinators: { id: string; full_name: string }[] = [];
-  if (profile.is_manager && request.status === "submitted") {
+  if (
+    (profile.is_manager && request.status === "submitted") ||
+    canManageCoordinatorAssignment
+  ) {
     const { data: coords } = await supabase
       .from("profiles")
       .select("id, full_name")
@@ -399,6 +409,19 @@ export default async function RequestDetailPage({
           <UnassignTechnicianControl
             requestId={id}
             currentTechnicianName={request.assigned_technician?.full_name ?? null}
+          />
+        )}
+        {canManageCoordinatorAssignment && (
+          <ReassignCoordinatorControl
+            requestId={id}
+            coordinators={coordinators}
+            currentCoordinatorName={request.owner?.full_name ?? null}
+          />
+        )}
+        {canManageCoordinatorAssignment && (
+          <UnassignCoordinatorControl
+            requestId={id}
+            currentCoordinatorName={request.owner?.full_name ?? null}
           />
         )}
         {canManagerEditRequest && (

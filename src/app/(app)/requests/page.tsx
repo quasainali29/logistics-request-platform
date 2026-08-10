@@ -60,6 +60,7 @@ export default async function RequestsPage({
   // so the default "own requests" filter below would show them nothing.
   // They see jobs assigned to them instead, same list/filter/pagination UI.
   const isTechnician = profile.role === "technician";
+  const isCoordinator = profile.role === "logistics_coordinator";
   const isManager = !!profile.is_manager;
 
   // Non-staff only ever see their own requests -- same restriction the
@@ -79,6 +80,11 @@ export default async function RequestsPage({
     if (!isStaff) {
       if (isTechnician) query = query.eq("assigned_technician_id", profile.id);
       else query = query.eq("requestor_id", profile.id);
+    } else if (isCoordinator) {
+      // Coordinators only ever see requests assigned to them, everywhere
+      // in the app -- same scoping as their dashboard, not just the
+      // requestor_id fallback non-staff roles get.
+      query = query.eq("owner_id", profile.id);
     }
     if (category) query = query.eq("category", category);
     if (projectId) query = query.eq("project_id", projectId);
@@ -110,6 +116,11 @@ export default async function RequestsPage({
     if (!isStaff) {
       if (isTechnician) query = query.eq("assigned_technician_id", profile.id);
       else query = query.eq("requestor_id", profile.id);
+    } else if (isCoordinator) {
+      // Coordinators only ever see requests assigned to them, everywhere
+      // in the app -- same scoping as their dashboard, not just the
+      // requestor_id fallback non-staff roles get.
+      query = query.eq("owner_id", profile.id);
     }
     if (category) query = query.eq("category", category);
     if (projectId) query = query.eq("project_id", projectId);
@@ -207,7 +218,9 @@ export default async function RequestsPage({
         <div>
           <h1 className="text-xl font-semibold text-slate-900">Requests</h1>
           <p className="text-sm text-slate-500 mt-1">
-            {isStaff
+            {isCoordinator
+              ? "Requests assigned to you."
+              : isStaff
               ? "All requests across the team."
               : isTechnician
               ? "Jobs assigned to you."
@@ -232,6 +245,7 @@ export default async function RequestsPage({
 
       <RequestsFilterBar
         isStaff={isStaff}
+        isCoordinator={isCoordinator}
         requestorOptions={requestorOptions}
         coordinatorOptions={coordinatorOptions}
         technicianOptions={technicianOptions}

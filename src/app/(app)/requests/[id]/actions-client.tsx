@@ -6,8 +6,11 @@ import {
   addComment,
   approveAndAssignRequest,
   rejectRequest,
+  rejectRequestClosed,
   assignTechnician,
   unassignTechnician,
+  reassignCoordinator,
+  unassignCoordinator,
 } from "../actions";
 
 export function StatusButton({
@@ -54,6 +57,8 @@ export function ApproveRejectControls({
   const [coordinatorId, setCoordinatorId] = useState("");
   const [showReject, setShowReject] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
+  const [showRejectClose, setShowRejectClose] = useState(false);
+  const [rejectCloseReason, setRejectCloseReason] = useState("");
 
   // Every category requires a reason before a request can be returned to
   // the requestor — enforced here via a mandatory popup.
@@ -66,6 +71,17 @@ export function ApproveRejectControls({
     startTransition(() => {
       rejectRequest(requestId, rejectReason.trim());
       setShowReject(false);
+    });
+  }
+
+  // "Reject" (as opposed to "Return for info" above) closes the request
+  // outright -- no rework loop, the requestor can't resubmit. Also requires
+  // a mandatory reason, which is posted as a comment.
+  function handleConfirmRejectClose() {
+    if (!rejectCloseReason.trim()) return;
+    startTransition(() => {
+      rejectRequestClosed(requestId, rejectCloseReason.trim());
+      setShowRejectClose(false);
     });
   }
 
@@ -91,6 +107,14 @@ export function ApproveRejectControls({
         type="button"
         disabled={pending}
         onClick={handleRejectClick}
+        className="rounded-md px-4 py-2 text-sm font-medium border border-slate-300 text-slate-700 hover:bg-slate-50 transition disabled:opacity-50"
+      >
+        Return for info
+      </button>
+      <button
+        type="button"
+        disabled={pending}
+        onClick={() => setShowRejectClose(true)}
         className="rounded-md px-4 py-2 text-sm font-medium bg-red-600 text-white hover:opacity-90 transition disabled:opacity-50"
       >
         Reject
@@ -132,6 +156,48 @@ export function ApproveRejectControls({
                 className="rounded-md px-4 py-2 text-sm font-medium bg-red-600 text-white hover:opacity-90 disabled:opacity-50"
               >
                 {pending ? "Submitting…" : "Submit"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRejectClose && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 w-full max-w-sm">
+            <h3 className="text-sm font-semibold text-red-600 mb-1">
+              Reject this request
+            </h3>
+            <p className="text-xs text-slate-500 mb-3">
+              This closes the request immediately — the requestor cannot
+              resubmit. A reason is required and will be posted as a
+              comment.
+            </p>
+            <textarea
+              value={rejectCloseReason}
+              onChange={(e) => setRejectCloseReason(e.target.value)}
+              rows={3}
+              placeholder="Reason for rejecting this request…"
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-red-500"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRejectClose(false);
+                  setRejectCloseReason("");
+                }}
+                className="rounded-md px-4 py-2 text-sm font-medium bg-white border border-slate-300 text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={pending || !rejectCloseReason.trim()}
+                onClick={handleConfirmRejectClose}
+                className="rounded-md px-4 py-2 text-sm font-medium bg-red-600 text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {pending ? "Rejecting…" : "Reject & close"}
               </button>
             </div>
           </div>
@@ -319,6 +385,149 @@ export function UnassignTechnicianControl({
             </h3>
             <p className="text-xs text-slate-500 mb-4">
               The request moves back to &ldquo;Team Assigned&rdquo;. No email is sent.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowConfirm(false)}
+                className="rounded-md px-4 py-2 text-sm font-medium bg-white border border-slate-300 text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={pending}
+                onClick={handleUnassign}
+                className="rounded-md px-4 py-2 text-sm font-medium bg-red-600 text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {pending ? "Removing…" : "Unassign"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// Manager-only reassign/unassign for the coordinator owning a request --
+// same popup pattern as AssignTechnicianControl/UnassignTechnicianControl
+// above, but for owner_id instead of assigned_technician_id, and gated to
+// managers only (coordinators can't reassign themselves or each other).
+export function ReassignCoordinatorControl({
+  requestId,
+  coordinators,
+  currentCoordinatorName = null,
+}: {
+  requestId: string;
+  coordinators: { id: string; full_name: string }[];
+  currentCoordinatorName?: string | null;
+}) {
+  const [pending, startTransition] = useTransition();
+  const [showAssign, setShowAssign] = useState(false);
+  const [coordinatorId, setCoordinatorId] = useState("");
+
+  function handleReassign() {
+    if (!coordinatorId) return;
+    startTransition(() => {
+      reassignCoordinator(requestId, coordinatorId);
+      setShowAssign(false);
+    });
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        disabled={pending}
+        onClick={() => setShowAssign(true)}
+        className="rounded-md px-4 py-2 text-sm font-medium border border-slate-300 text-slate-700 hover:bg-slate-50 transition disabled:opacity-50"
+      >
+        Reassign Coordinator
+      </button>
+
+      {showAssign && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 w-full max-w-sm">
+            <h3 className="text-sm font-semibold text-slate-900 mb-1">
+              Reassign to a different coordinator
+            </h3>
+            <p className="text-xs text-slate-500 mb-3">
+              {currentCoordinatorName ? `${currentCoordinatorName} will be removed from this request. ` : ""}
+              The newly selected coordinator will be notified by email.
+            </p>
+            <select
+              value={coordinatorId}
+              onChange={(e) => setCoordinatorId(e.target.value)}
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+            >
+              <option value="">Select a coordinator…</option>
+              {coordinators.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.full_name}
+                </option>
+              ))}
+            </select>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowAssign(false)}
+                className="rounded-md px-4 py-2 text-sm font-medium bg-white border border-slate-300 text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={pending || !coordinatorId}
+                onClick={handleReassign}
+                className="rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {pending ? "Reassigning…" : "Confirm & Reassign"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+export function UnassignCoordinatorControl({
+  requestId,
+  currentCoordinatorName = null,
+}: {
+  requestId: string;
+  currentCoordinatorName?: string | null;
+}) {
+  const [pending, startTransition] = useTransition();
+  const [showConfirm, setShowConfirm] = useState(false);
+
+  function handleUnassign() {
+    startTransition(() => {
+      unassignCoordinator(requestId);
+      setShowConfirm(false);
+    });
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        disabled={pending}
+        onClick={() => setShowConfirm(true)}
+        className="rounded-md px-4 py-2 text-sm font-medium border border-red-300 text-red-600 hover:bg-red-50 transition disabled:opacity-50"
+      >
+        Unassign Coordinator
+      </button>
+
+      {showConfirm && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 w-full max-w-sm">
+            <h3 className="text-sm font-semibold text-slate-900 mb-1">
+              Remove {currentCoordinatorName ?? "this coordinator"} from this request?
+            </h3>
+            <p className="text-xs text-slate-500 mb-4">
+              The request moves back to &ldquo;Approved&rdquo;. No email is sent.
             </p>
             <div className="flex justify-end gap-2">
               <button

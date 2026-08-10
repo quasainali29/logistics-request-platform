@@ -22,6 +22,7 @@ const SORT_OPTIONS = [
 
 export default function RequestsFilterBar({
   isStaff,
+  isCoordinator = false,
   requestorOptions,
   coordinatorOptions,
   technicianOptions,
@@ -29,6 +30,7 @@ export default function RequestsFilterBar({
   projectOptions,
 }: {
   isStaff: boolean;
+  isCoordinator?: boolean;
   requestorOptions: { id: string; full_name: string }[];
   coordinatorOptions: { id: string; full_name: string }[];
   technicianOptions: { id: string; full_name: string }[];
@@ -151,7 +153,7 @@ export default function RequestsFilterBar({
           </Field>
         )}
 
-        {isStaff && (
+        {isStaff && !isCoordinator && (
           <Field label="Coordinator">
             <select
               value={searchParams.get("coordinator") ?? ""}

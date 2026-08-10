@@ -1183,6 +1183,116 @@ export async function unassignTechnician(requestId: string) {
   revalidatePath("/requests");
 }
 
+// Manager pulls a request's owning coordinator off and hands it to someone
+// else -- e.g. the original coordinator is overloaded or unavailable. Only
+// managers can do this (unlike technician reassignment, which coordinators
+// can also do for their own jobs) since this changes who owns the request
+// itself. Modeled directly on assignTechnician above: same shape, just a
+// coordinator/owner_id instead of a technician/assigned_technician_id, and
+// the status stays put (still "under_process") since ownership is moving,
+// not the workflow stage.
+export async function reassignCoordinator(requestId: string, coordinatorId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const isManager = await currentUserIsManager(supabase, user.id);
+  if (!isManager) {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "Only managers can reassign a coordinator."
+      )}`
+    );
+  }
+
+  if (!coordinatorId) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent("Please select a coordinator.")}`);
+  }
+
+  const [{ data: coordinator }, { data: request }] = await Promise.all([
+    supabase.from("profiles").select("full_name, email").eq("id", coordinatorId).single(),
+    supabase
+      .from("requests")
+      .select("request_number, title, category, priority, project, project_id, department, date_required")
+      .eq("id", requestId)
+      .single(),
+  ]);
+
+  const { error } = await supabase
+    .from("requests")
+    .update({ owner_id: coordinatorId })
+    .eq("id", requestId);
+
+  if (error) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  if (coordinator?.email && request) {
+    const [categoryDetails, projectName] = await Promise.all([
+      fetchCategoryDetails(supabase, request.category, requestId),
+      resolveProjectName(supabase, request.project, request.project_id),
+    ]);
+
+    await sendNotificationEmail({
+      to: coordinator.email,
+      subject: `You've been assigned: ${request.request_number}`,
+      html: buildRequestEmailHtml({
+        requestNumber: request.request_number,
+        title: request.title,
+        category: request.category,
+        priority: request.priority,
+        project: projectName,
+        department: request.department,
+        dateRequired: request.date_required,
+        categoryDetails,
+        headline: `Hi ${coordinator.full_name}, you've been assigned a request`,
+        ctaLabel: "View and start work",
+        ctaUrl: `${APP_URL}/requests/${requestId}`,
+      }),
+    });
+  }
+
+  revalidatePath(`/requests/${requestId}`);
+  revalidatePath("/requests");
+  revalidatePath("/dashboard");
+}
+
+// Manager removes a coordinator from a request entirely -- drops it back to
+// "approved", the stage just before a coordinator owns it, same one step
+// back that unassignTechnician takes relative to assignTechnician. No email
+// is sent since there's no one left to notify.
+export async function unassignCoordinator(requestId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const isManager = await currentUserIsManager(supabase, user.id);
+  if (!isManager) {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "Only managers can unassign a coordinator."
+      )}`
+    );
+  }
+
+  const { error } = await supabase
+    .from("requests")
+    .update({ owner_id: null, status: "approved" })
+    .eq("id", requestId);
+
+  if (error) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath(`/requests/${requestId}`);
+  revalidatePath("/requests");
+  revalidatePath("/dashboard");
+}
+
 // The technician's "Mark Completed" submission from the mobile flow at
 // /requests/[id]/complete -- uploads photos and the on-screen signature,
 // writes them to request_closeouts alongside the signer's name/role, and
@@ -1367,6 +1477,67 @@ export async function rejectRequest(requestId: string, reason?: string) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ requestId, status: newStatus, reason: reason.trim() }),
+    });
+  } catch {
+    // Email failures should never block the workflow action itself.
+  }
+
+  revalidatePath(`/requests/${requestId}`);
+  revalidatePath("/requests");
+  revalidatePath("/dashboard");
+}
+
+// Manager rejects a request outright -- unlike rejectRequest above (which
+// sends it back to the requestor as a resumable "Returned for Info"), this
+// closes it immediately. There's no rework loop: the reason is posted as a
+// comment and the request is done. Deliberately sets "closed" rather than
+// the dormant "rejected" terminal status, since "closed" is the status the
+// rest of the app (reports, Cost Breakdown, filters) already treats as
+// finished.
+export async function rejectRequestClosed(requestId: string, reason: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const isManager = await currentUserIsManager(supabase, user.id);
+  if (!isManager) {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "Only managers can reject requests."
+      )}`
+    );
+  }
+
+  if (!reason || !reason.trim()) {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "A reason is required to reject this request."
+      )}`
+    );
+  }
+
+  const { error } = await supabase
+    .from("requests")
+    .update({ status: "closed" })
+    .eq("id", requestId);
+
+  if (error) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  await supabase.from("comments").insert({
+    request_id: requestId,
+    author_id: user.id,
+    comment: `Rejected: ${reason.trim()}`,
+  });
+
+  try {
+    await fetch(`${APP_URL}/api/notify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId, status: "closed", reason: reason.trim() }),
     });
   } catch {
     // Email failures should never block the workflow action itself.
