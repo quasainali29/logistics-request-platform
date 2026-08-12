@@ -16,15 +16,23 @@ export default async function CompleteJobPage({
   const profile = await getProfile();
   const supabase = await createClient();
 
-  const { data: request } = await supabase
-    .from("requests")
-    .select("id, request_number, title, category, status, assigned_technician_id")
-    .eq("id", id)
-    .single();
+  const [{ data: request }, { data: crewRow }] = await Promise.all([
+    supabase
+      .from("requests")
+      .select("id, request_number, title, category, status")
+      .eq("id", id)
+      .single(),
+    supabase
+      .from("request_technicians")
+      .select("technician_id")
+      .eq("request_id", id)
+      .eq("technician_id", profile.id)
+      .maybeSingle(),
+  ]);
 
   if (!request) notFound();
 
-  if (request.assigned_technician_id !== profile.id) {
+  if (!crewRow) {
     redirect(`/requests/${id}?error=${encodeURIComponent("This job isn't assigned to you.")}`);
   }
 

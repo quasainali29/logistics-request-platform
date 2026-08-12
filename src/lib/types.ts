@@ -111,6 +111,10 @@ export interface RequestRow {
   description: string | null;
   special_instructions: string | null;
   owner_id: string | null;
+  // assigned_technician_id is frozen historical data as of migration 020 --
+  // a request's technician crew now lives in request_technicians (a job can
+  // have more than one). The column is kept in the DB for rollback safety
+  // but the app no longer reads or writes it.
   assigned_technician_id: string | null;
   approved_by: string | null;
   approval_date: string | null;
@@ -118,7 +122,14 @@ export interface RequestRow {
   updated_at: string;
   requestor?: Profile;
   owner?: Profile;
-  assigned_technician?: Profile;
+  // Populated via the request_technicians embed (see requests/page.tsx and
+  // requests/[id]/page.tsx) -- the crew currently assigned to this request,
+  // and whether each member has accepted the job yet.
+  request_technicians?: {
+    technician_id: string;
+    accepted_at: string | null;
+    technician?: Profile;
+  }[];
   // Populated only on the requests list query (a join alongside the plain
   // `project_id`/`project` columns above) so the table can show a live
   // project name without an extra query per row. Prefer this over the

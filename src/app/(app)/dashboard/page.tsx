@@ -22,18 +22,41 @@ export default async function DashboardPage() {
   // them), so they get their own dashboard entirely: jobs currently
   // assigned to them, not requests they raised.
   if (isTechnician) {
-    const [{ data: myJobs }, stageList] = await Promise.all([
+    // A job now has a crew, not one assigned_technician_id -- fetched via
+    // request_technicians (see migration 020) instead of a direct filter
+    // on requests. "Counts for everyone assigned" (this dashboard's
+    // scoring included) falls out naturally: each crew member has their
+    // own row here regardless of who else is on the job.
+    type TechJob = {
+      id: string;
+      request_number: string;
+      title: string;
+      category: string;
+      status: string;
+      priority: string;
+      date_required: string | null;
+      updated_at: string;
+    };
+
+    const [{ data: myJobRows }, stageList] = await Promise.all([
       supabase
-        .from("requests")
+        .from("request_technicians")
         .select(
-          "id, request_number, title, category, status, priority, date_required, updated_at"
+          "request:requests(id, request_number, title, category, status, priority, date_required, updated_at)"
         )
-        .eq("assigned_technician_id", profile.id)
-        .order("date_required", { ascending: true, nullsFirst: false }),
+        .eq("technician_id", profile.id),
       getWorkflowStages(),
     ]);
 
-    const jobs = myJobs ?? [];
+    const jobs = (myJobRows ?? [])
+      .map((r) => r.request as unknown as TechJob | null)
+      .filter((r): r is TechJob => r !== null)
+      .sort((a, b) => {
+        if (!a.date_required && !b.date_required) return 0;
+        if (!a.date_required) return 1;
+        if (!b.date_required) return -1;
+        return new Date(a.date_required).getTime() - new Date(b.date_required).getTime();
+      });
     const isTerminal = (category: string, statusKey: string) =>
       stageList.find((s) => s.category === category && s.key === statusKey)?.is_terminal ??
       false;

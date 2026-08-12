@@ -1064,30 +1064,162 @@ export async function approveAndAssignRequest(requestId: string, coordinatorId: 
   revalidatePath("/dashboard");
 }
 
-// Coordinator/manager picks a technician for a request that's already
-// theirs (status "under_process" / "Team Assigned"). Sets the request to
-// "assigned" -- the first of the three dormant stages (assigned, dispatched,
-// on_site) that this feature finally wires up with real buttons, gated to
-// the technician role via workflow_transitions (see migration 018).
-export async function assignTechnician(requestId: string, technicianId: string) {
+// Shared by every technician-crew action below (used to be duplicated
+// inline in assignTechnician/unassignTechnician; factored out once there
+// were four call sites instead of two).
+async function canManageTechnicianAssignment(supabase: SupabaseClient, userId: string) {
+  const { data: actor } = await supabase
+    .from("profiles")
+    .select("role, role_info:roles!profiles_role_fkey(is_manager)")
+    .eq("id", userId)
+    .single();
+  const isManager = !!(actor?.role_info as unknown as { is_manager: boolean } | null)?.is_manager;
+  return isManager || actor?.role === "logistics_coordinator";
+}
+
+// After a technician accepts, or after a not-yet-accepted technician is
+// removed from the crew, the request may now have every remaining
+// technician accepted -- in which case it auto-advances from "Assigned" to
+// "Dispatched" for the whole crew, same as the old single-technician flow's
+// "Accept Job" button used to do with one person. Fires the same
+// requestor-facing email /api/notify already sends for every other status
+// transition (see updateRequestStatus above).
+async function maybeAdvanceToDispatched(supabase: SupabaseClient, requestId: string) {
+  const { data: request } = await supabase
+    .from("requests")
+    .select("status")
+    .eq("id", requestId)
+    .single();
+
+  if (request?.status !== "assigned") return;
+
+  const { data: crew } = await supabase
+    .from("request_technicians")
+    .select("accepted_at")
+    .eq("request_id", requestId);
+
+  if (!crew || crew.length === 0) return;
+  const allAccepted = crew.every((c) => c.accepted_at !== null);
+  if (!allAccepted) return;
+
+  await supabase.from("requests").update({ status: "dispatched" }).eq("id", requestId);
+
+  try {
+    await fetch(`${APP_URL}/api/notify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId, status: "dispatched" }),
+    });
+  } catch {
+    // Email failures should never block the workflow action itself.
+  }
+}
+
+// Coordinator/manager picks the crew for a request that's already theirs
+// (status "under_process" / "Team Assigned") and has no technicians on it
+// yet. Sets the request to "assigned" -- the first of the three dormant
+// stages (assigned, dispatched, on_site) migration 018 originally wired up
+// for a single technician; this now supports a crew of any size, each
+// member individually accepting via acceptJob below before the request as
+// a whole advances to Dispatched.
+export async function assignTechnicians(requestId: string, technicianIds: string[]) {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: actor } = await supabase
-    .from("profiles")
-    .select("role, role_info:roles!profiles_role_fkey(is_manager)")
-    .eq("id", user.id)
-    .single();
-
-  const isManager = !!(actor?.role_info as unknown as { is_manager: boolean } | null)?.is_manager;
-  const canAssign = isManager || actor?.role === "logistics_coordinator";
+  const canAssign = await canManageTechnicianAssignment(supabase, user.id);
   if (!canAssign) {
     redirect(
       `/requests/${requestId}?error=${encodeURIComponent(
-        "You don't have permission to assign a technician."
+        "You don't have permission to assign technicians."
+      )}`
+    );
+  }
+
+  const ids = [...new Set(technicianIds.filter(Boolean))];
+  if (ids.length === 0) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent("Select at least one technician.")}`);
+  }
+
+  const [{ data: technicians }, { data: request }] = await Promise.all([
+    supabase.from("profiles").select("id, full_name, email").in("id", ids),
+    supabase
+      .from("requests")
+      .select("request_number, title, category, priority, project, project_id, department, date_required")
+      .eq("id", requestId)
+      .single(),
+  ]);
+
+  const { error: crewError } = await supabase
+    .from("request_technicians")
+    .insert(ids.map((technicianId) => ({ request_id: requestId, technician_id: technicianId })));
+
+  if (crewError) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent(crewError.message)}`);
+  }
+
+  const { error } = await supabase
+    .from("requests")
+    .update({ status: "assigned" })
+    .eq("id", requestId);
+
+  if (error) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  if (request) {
+    const [categoryDetails, projectName] = await Promise.all([
+      fetchCategoryDetails(supabase, request.category, requestId),
+      resolveProjectName(supabase, request.project, request.project_id),
+    ]);
+
+    for (const technician of technicians ?? []) {
+      if (!technician.email) continue;
+      await sendNotificationEmail({
+        to: technician.email,
+        subject: `New job assigned: ${request.request_number}`,
+        html: buildRequestEmailHtml({
+          requestNumber: request.request_number,
+          title: request.title,
+          category: request.category,
+          priority: request.priority,
+          project: projectName,
+          department: request.department,
+          dateRequired: request.date_required,
+          categoryDetails,
+          headline: `Hi ${technician.full_name}, a job has been assigned to you`,
+          ctaLabel: "View job",
+          ctaUrl: `${APP_URL}/requests/${requestId}`,
+        }),
+      });
+    }
+  }
+
+  revalidatePath(`/requests/${requestId}`);
+  revalidatePath("/requests");
+  revalidatePath("/dashboard");
+}
+
+// Coordinator/manager adds one more technician to a crew that already has
+// at least one person on it (use assignTechnicians above for the first
+// assignment). If the request has already moved past "Assigned"
+// (Dispatched/On Site), the new addition is auto-accepted rather than
+// dragging the whole crew's status back to wait on them -- joining
+// already-in-progress work shouldn't stall everyone else.
+export async function addTechnician(requestId: string, technicianId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const canAssign = await canManageTechnicianAssignment(supabase, user.id);
+  if (!canAssign) {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "You don't have permission to add a technician."
       )}`
     );
   }
@@ -1100,15 +1232,18 @@ export async function assignTechnician(requestId: string, technicianId: string) 
     supabase.from("profiles").select("full_name, email").eq("id", technicianId).single(),
     supabase
       .from("requests")
-      .select("request_number, title, category, priority, project, project_id, department, date_required")
+      .select("request_number, title, category, priority, project, project_id, department, date_required, status")
       .eq("id", requestId)
       .single(),
   ]);
 
-  const { error } = await supabase
-    .from("requests")
-    .update({ assigned_technician_id: technicianId, status: "assigned" })
-    .eq("id", requestId);
+  const alreadyInProgress = !!request && request.status !== "assigned";
+
+  const { error } = await supabase.from("request_technicians").insert({
+    request_id: requestId,
+    technician_id: technicianId,
+    accepted_at: alreadyInProgress ? new Date().toISOString() : null,
+  });
 
   if (error) {
     redirect(`/requests/${requestId}?error=${encodeURIComponent(error.message)}`);
@@ -1141,54 +1276,93 @@ export async function assignTechnician(requestId: string, technicianId: string) 
 
   revalidatePath(`/requests/${requestId}`);
   revalidatePath("/requests");
+  revalidatePath("/dashboard");
 }
 
-// Coordinator/manager pulls a technician off a job -- e.g. they're
+// Coordinator/manager pulls one technician off a job -- e.g. they're
 // unavailable or the wrong person was picked. No email is sent (unlike
-// assignTechnician above) since there's no one left to notify; the job
-// simply drops back to "Team Assigned" until someone is assigned again.
-export async function unassignTechnician(requestId: string) {
+// assign/add above) since there's no one left to notify. If they were the
+// last remaining technician, the job drops back to "Team Assigned" until
+// someone is assigned again, same as the old single-technician unassign.
+// Otherwise the rest of the crew is untouched, and removing a not-yet-
+// accepted technician may complete the remaining crew's acceptance --
+// checked via maybeAdvanceToDispatched.
+export async function removeTechnician(requestId: string, technicianId: string) {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: actor } = await supabase
-    .from("profiles")
-    .select("role, role_info:roles!profiles_role_fkey(is_manager)")
-    .eq("id", user.id)
-    .single();
-
-  const isManager = !!(actor?.role_info as unknown as { is_manager: boolean } | null)?.is_manager;
-  const canAssign = isManager || actor?.role === "logistics_coordinator";
+  const canAssign = await canManageTechnicianAssignment(supabase, user.id);
   if (!canAssign) {
     redirect(
       `/requests/${requestId}?error=${encodeURIComponent(
-        "You don't have permission to unassign a technician."
+        "You don't have permission to remove a technician."
       )}`
     );
   }
 
   const { error } = await supabase
-    .from("requests")
-    .update({ assigned_technician_id: null, status: "under_process" })
-    .eq("id", requestId);
+    .from("request_technicians")
+    .delete()
+    .eq("request_id", requestId)
+    .eq("technician_id", technicianId);
 
   if (error) {
     redirect(`/requests/${requestId}?error=${encodeURIComponent(error.message)}`);
   }
 
+  const { count } = await supabase
+    .from("request_technicians")
+    .select("id", { count: "exact", head: true })
+    .eq("request_id", requestId);
+
+  if (!count) {
+    await supabase.from("requests").update({ status: "under_process" }).eq("id", requestId);
+  } else {
+    await maybeAdvanceToDispatched(supabase, requestId);
+  }
+
   revalidatePath(`/requests/${requestId}`);
   revalidatePath("/requests");
+  revalidatePath("/dashboard");
+}
+
+// A technician on the crew taps "Accept Job" -- sets their own row's
+// accepted_at (RLS restricts this update to their own row regardless of
+// what requestId/technicianId is passed). Once every crew member has
+// accepted, the request as a whole advances to "Dispatched".
+export async function acceptJob(requestId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { error } = await supabase
+    .from("request_technicians")
+    .update({ accepted_at: new Date().toISOString() })
+    .eq("request_id", requestId)
+    .eq("technician_id", user.id);
+
+  if (error) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  await maybeAdvanceToDispatched(supabase, requestId);
+
+  revalidatePath(`/requests/${requestId}`);
+  revalidatePath("/requests");
+  revalidatePath("/dashboard");
 }
 
 // Manager pulls a request's owning coordinator off and hands it to someone
 // else -- e.g. the original coordinator is overloaded or unavailable. Only
 // managers can do this (unlike technician reassignment, which coordinators
 // can also do for their own jobs) since this changes who owns the request
-// itself. Modeled directly on assignTechnician above: same shape, just a
-// coordinator/owner_id instead of a technician/assigned_technician_id, and
+// itself. Modeled directly on assignTechnicians above: same shape, just a
+// coordinator/owner_id instead of a technician crew, and
 // the status stays put (still "under_process") since ownership is moving,
 // not the workflow stage.
 export async function reassignCoordinator(requestId: string, coordinatorId: string) {
@@ -1261,7 +1435,7 @@ export async function reassignCoordinator(requestId: string, coordinatorId: stri
 
 // Manager removes a coordinator from a request entirely -- drops it back to
 // "approved", the stage just before a coordinator owns it, same one step
-// back that unassignTechnician takes relative to assignTechnician. No email
+// back that removeTechnician takes when the last technician is removed. No email
 // is sent since there's no one left to notify.
 export async function unassignCoordinator(requestId: string) {
   const supabase = await createClient();
@@ -1306,20 +1480,28 @@ export async function technicianCompleteJob(requestId: string, formData: FormDat
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: request } = await supabase
-    .from("requests")
-    .select("assigned_technician_id, status, request_number, title, category, owner:profiles!requests_owner_id_fkey(full_name, email)")
-    .eq("id", requestId)
-    .single();
+  const [{ data: request }, { data: crewRow }] = await Promise.all([
+    supabase
+      .from("requests")
+      .select("status, request_number, title, category, owner:profiles!requests_owner_id_fkey(full_name, email)")
+      .eq("id", requestId)
+      .single(),
+    supabase
+      .from("request_technicians")
+      .select("technician_id")
+      .eq("request_id", requestId)
+      .eq("technician_id", user.id)
+      .maybeSingle(),
+  ]);
 
   if (!request) {
     redirect(`/requests/${requestId}?error=${encodeURIComponent("Request not found.")}`);
   }
 
-  if (request.assigned_technician_id !== user.id) {
+  if (!crewRow) {
     redirect(
       `/requests/${requestId}?error=${encodeURIComponent(
-        "Only the technician assigned to this job can complete it."
+        "Only a technician assigned to this job can complete it."
       )}`
     );
   }

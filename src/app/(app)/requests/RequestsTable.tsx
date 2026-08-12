@@ -14,6 +14,15 @@ import {
   type WorkflowStage,
   type RequestRow,
 } from "@/lib/types";
+
+// "Azhar" for one, "Azhar, Shahoalom" for two, "Azhar +2" for three or
+// more -- keeps the column readable regardless of crew size.
+function crewLabel(crew: RequestRow["request_technicians"]) {
+  const names = (crew ?? []).map((c) => c.technician?.full_name).filter(Boolean) as string[];
+  if (names.length === 0) return null;
+  if (names.length <= 2) return names.join(", ");
+  return `${names[0]} +${names.length - 1}`;
+}
 import { deleteRequests } from "./actions";
 
 export default function RequestsTable({
@@ -205,7 +214,7 @@ export default function RequestsTable({
                   {r.owner?.full_name ?? <span className="text-slate-400">Not assigned</span>}
                 </td>
                 <td className="px-4 py-3 text-slate-600">
-                  {r.assigned_technician?.full_name ?? (
+                  {crewLabel(r.request_technicians) ?? (
                     <span className="text-slate-400">Not assigned</span>
                   )}
                 </td>

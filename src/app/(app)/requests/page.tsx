@@ -13,8 +13,22 @@ const PAGE_SIZE = 25;
 // it keeps the common sorts (date/due) on the cheap range()-paginated path.
 const PRIORITY_RANK: Record<string, number> = { urgent: 4, high: 3, medium: 2, low: 1 };
 
+// The technician relation is embedded two ways depending on whether we're
+// filtering by a specific technician: a plain left-embed shows every
+// request's crew regardless of who's on it, while an `!inner` embed
+// restricts the parent rows themselves to only those with a matching crew
+// member -- PostgREST's standard "filter through an embedded resource"
+// pattern, used below (via the filterByTechnician ternary at each .select
+// call) whenever a technician filter is active: the technician's own "my
+// jobs" view, or the staff Technician dropdown. Two named literal
+// constants rather than a function returning a computed string -- passing
+// a plain `string`-typed value to .select() defeats supabase-js's
+// compile-time query parser and the row type falls back to
+// GenericStringError, so this keeps each branch a proper string literal.
 const REQUEST_SELECT =
-  "*, requestor:profiles!requests_requestor_id_fkey(full_name), owner:profiles!requests_owner_id_fkey(full_name), assigned_technician:profiles!requests_assigned_technician_id_fkey(full_name), linked_project:projects!requests_project_id_fkey(name)";
+  "*, requestor:profiles!requests_requestor_id_fkey(full_name), owner:profiles!requests_owner_id_fkey(full_name), request_technicians(technician_id, accepted_at, technician:profiles!request_technicians_technician_id_fkey(full_name)), linked_project:projects!requests_project_id_fkey(name)";
+const REQUEST_SELECT_TECH_FILTER =
+  "*, requestor:profiles!requests_requestor_id_fkey(full_name), owner:profiles!requests_owner_id_fkey(full_name), request_technicians!inner(technician_id, accepted_at, technician:profiles!request_technicians_technician_id_fkey(full_name)), linked_project:projects!requests_project_id_fkey(name)";
 
 export default async function RequestsPage({
   searchParams,
@@ -63,6 +77,13 @@ export default async function RequestsPage({
   const isCoordinator = profile.role === "logistics_coordinator";
   const isManager = !!profile.is_manager;
 
+  // A technician filters to "requests I'm on the crew for"; staff can
+  // additionally filter to a specific technician via the dropdown. Only
+  // one of these applies at a time -- a technician doesn't also see the
+  // staff-only Technician filter (see RequestsFilterBar).
+  const technicianFilterId = isTechnician ? profile.id : isStaff ? technicianId : "";
+  const filterByTechnician = !!technicianFilterId;
+
   // Non-staff only ever see their own requests -- same restriction the
   // page always enforced, just applied consistently alongside the new
   // filters below. Duplicated across the two branches below (rather than
@@ -76,21 +97,25 @@ export default async function RequestsPage({
   let total = 0;
 
   if (sort === "priority") {
-    let query = supabase.from("requests").select(REQUEST_SELECT, { count: "exact" });
+    let query = supabase
+      .from("requests")
+      .select(filterByTechnician ? REQUEST_SELECT_TECH_FILTER : REQUEST_SELECT, { count: "exact" });
     if (!isStaff) {
-      if (isTechnician) query = query.eq("assigned_technician_id", profile.id);
-      else query = query.eq("requestor_id", profile.id);
+      if (!isTechnician) query = query.eq("requestor_id", profile.id);
+      // Technicians are scoped below via the request_technicians!inner
+      // embed + eq filter -- eq("assigned_technician_id", ...) doesn't
+      // exist anymore now that a request can have more than one.
     } else if (isCoordinator) {
       // Coordinators only ever see requests assigned to them, everywhere
       // in the app -- same scoping as their dashboard, not just the
       // requestor_id fallback non-staff roles get.
       query = query.eq("owner_id", profile.id);
     }
+    if (filterByTechnician) query = query.eq("request_technicians.technician_id", technicianFilterId);
     if (category) query = query.eq("category", category);
     if (projectId) query = query.eq("project_id", projectId);
     if (isStaff && requestorId) query = query.eq("requestor_id", requestorId);
     if (isStaff && coordinatorId) query = query.eq("owner_id", coordinatorId);
-    if (isStaff && technicianId) query = query.eq("assigned_technician_id", technicianId);
     if (priority) query = query.eq("priority", priority);
     if (status) query = query.eq("status", status);
     if (search) query = query.ilike("request_number", `%${search}%`);
@@ -112,21 +137,25 @@ export default async function RequestsPage({
     total = count ?? all.length;
     requests = all.slice(from, to + 1);
   } else {
-    let query = supabase.from("requests").select(REQUEST_SELECT, { count: "exact" });
+    let query = supabase
+      .from("requests")
+      .select(filterByTechnician ? REQUEST_SELECT_TECH_FILTER : REQUEST_SELECT, { count: "exact" });
     if (!isStaff) {
-      if (isTechnician) query = query.eq("assigned_technician_id", profile.id);
-      else query = query.eq("requestor_id", profile.id);
+      if (!isTechnician) query = query.eq("requestor_id", profile.id);
+      // Technicians are scoped below via the request_technicians!inner
+      // embed + eq filter -- eq("assigned_technician_id", ...) doesn't
+      // exist anymore now that a request can have more than one.
     } else if (isCoordinator) {
       // Coordinators only ever see requests assigned to them, everywhere
       // in the app -- same scoping as their dashboard, not just the
       // requestor_id fallback non-staff roles get.
       query = query.eq("owner_id", profile.id);
     }
+    if (filterByTechnician) query = query.eq("request_technicians.technician_id", technicianFilterId);
     if (category) query = query.eq("category", category);
     if (projectId) query = query.eq("project_id", projectId);
     if (isStaff && requestorId) query = query.eq("requestor_id", requestorId);
     if (isStaff && coordinatorId) query = query.eq("owner_id", coordinatorId);
-    if (isStaff && technicianId) query = query.eq("assigned_technician_id", technicianId);
     if (priority) query = query.eq("priority", priority);
     if (status) query = query.eq("status", status);
     if (search) query = query.ilike("request_number", `%${search}%`);

@@ -7,8 +7,10 @@ import {
   approveAndAssignRequest,
   rejectRequest,
   rejectRequestClosed,
-  assignTechnician,
-  unassignTechnician,
+  assignTechnicians,
+  addTechnician,
+  removeTechnician,
+  acceptJob,
   reassignCoordinator,
   unassignCoordinator,
 } from "../actions";
@@ -250,31 +252,32 @@ export function ApproveRejectControls({
   );
 }
 
-// Coordinator/manager picks a technician for a request that's already
-// theirs -- moves it to "Assigned" and emails the technician. Modeled on
-// ApproveRejectControls' popup pattern above.
-export function AssignTechnicianControl({
+// Coordinator/manager picks the crew for a request that has no
+// technicians on it yet -- moves it to "Assigned" and emails everyone
+// selected. Modeled on ApproveRejectControls' popup pattern above, but a
+// checkbox list instead of a single dropdown since a job can need more
+// than one technician.
+export function AssignTechniciansControl({
   requestId,
   technicians,
-  mode = "assign",
-  currentTechnicianName = null,
 }: {
   requestId: string;
   technicians: { id: string; full_name: string }[];
-  mode?: "assign" | "reassign";
-  currentTechnicianName?: string | null;
 }) {
   const [pending, startTransition] = useTransition();
   const [showAssign, setShowAssign] = useState(false);
-  const [technicianId, setTechnicianId] = useState("");
+  const [selected, setSelected] = useState<string[]>([]);
 
-  const isReassign = mode === "reassign";
+  function toggle(id: string) {
+    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
 
   function handleAssign() {
-    if (!technicianId) return;
+    if (selected.length === 0) return;
     startTransition(() => {
-      assignTechnician(requestId, technicianId);
+      assignTechnicians(requestId, selected);
       setShowAssign(false);
+      setSelected([]);
     });
   }
 
@@ -284,62 +287,51 @@ export function AssignTechnicianControl({
         type="button"
         disabled={pending}
         onClick={() => setShowAssign(true)}
-        className={
-          isReassign
-            ? "rounded-md px-4 py-2 text-sm font-medium border border-slate-300 text-slate-700 hover:bg-slate-50 transition disabled:opacity-50"
-            : "rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 transition disabled:opacity-50"
-        }
+        className="rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 transition disabled:opacity-50"
       >
-        {isReassign ? "Reassign Technician" : "Assign Technician"}
+        Assign Technicians
       </button>
 
       {showAssign && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl p-6 w-full max-w-sm">
-            <h3 className="text-sm font-semibold text-slate-900 mb-1">
-              {isReassign ? "Reassign to a different technician" : "Assign a technician"}
-            </h3>
+            <h3 className="text-sm font-semibold text-slate-900 mb-1">Assign technicians</h3>
             <p className="text-xs text-slate-500 mb-3">
-              {isReassign ? (
-                <>
-                  {currentTechnicianName ? `${currentTechnicianName} will be removed from this job. ` : ""}
-                  The request moves back to &ldquo;Assigned&rdquo; and the newly
-                  selected technician will be notified by email to accept the job.
-                </>
-              ) : (
-                <>
-                  This request will move to &ldquo;Assigned&rdquo; and the selected
-                  technician will be notified by email to accept the job.
-                </>
-              )}
+              Select everyone needed for this job. The request moves to
+              &ldquo;Assigned&rdquo; now, and to &ldquo;Dispatched&rdquo; once everyone
+              selected has accepted.
             </p>
-            <select
-              value={technicianId}
-              onChange={(e) => setTechnicianId(e.target.value)}
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-            >
-              <option value="">Select a technician…</option>
+            <div className="flex flex-col gap-2 mb-4 max-h-56 overflow-y-auto">
               {technicians.map((t) => (
-                <option key={t.id} value={t.id}>
+                <label key={t.id} className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(t.id)}
+                    onChange={() => toggle(t.id)}
+                    className="rounded border-slate-300"
+                  />
                   {t.full_name}
-                </option>
+                </label>
               ))}
-            </select>
+            </div>
             <div className="flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setShowAssign(false)}
+                onClick={() => {
+                  setShowAssign(false);
+                  setSelected([]);
+                }}
                 className="rounded-md px-4 py-2 text-sm font-medium bg-white border border-slate-300 text-slate-700 hover:bg-slate-50"
               >
                 Cancel
               </button>
               <button
                 type="button"
-                disabled={pending || !technicianId}
+                disabled={pending || selected.length === 0}
                 onClick={handleAssign}
                 className="rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
               >
-                {pending ? "Assigning…" : isReassign ? "Confirm & Reassign" : "Confirm & Assign"}
+                {pending ? "Assigning…" : "Confirm & Assign"}
               </button>
             </div>
           </div>
@@ -349,20 +341,34 @@ export function AssignTechnicianControl({
   );
 }
 
-export function UnassignTechnicianControl({
+// Coordinator/manager adds or removes individual technicians on a request
+// that already has a crew -- replaces the old single-technician
+// Reassign/Unassign pair now that a job can have more than one person on
+// it. Each row shows whether that technician has accepted yet.
+export function ManageTechniciansControl({
   requestId,
-  currentTechnicianName = null,
+  crew,
+  availableTechnicians,
 }: {
   requestId: string;
-  currentTechnicianName?: string | null;
+  crew: { technician_id: string; full_name: string; accepted_at: string | null }[];
+  availableTechnicians: { id: string; full_name: string }[];
 }) {
   const [pending, startTransition] = useTransition();
-  const [showConfirm, setShowConfirm] = useState(false);
+  const [showManage, setShowManage] = useState(false);
+  const [addId, setAddId] = useState("");
 
-  function handleUnassign() {
+  function handleRemove(technicianId: string) {
     startTransition(() => {
-      unassignTechnician(requestId);
-      setShowConfirm(false);
+      removeTechnician(requestId, technicianId);
+    });
+  }
+
+  function handleAdd() {
+    if (!addId) return;
+    startTransition(() => {
+      addTechnician(requestId, addId);
+      setAddId("");
     });
   }
 
@@ -371,36 +377,77 @@ export function UnassignTechnicianControl({
       <button
         type="button"
         disabled={pending}
-        onClick={() => setShowConfirm(true)}
-        className="rounded-md px-4 py-2 text-sm font-medium border border-red-300 text-red-600 hover:bg-red-50 transition disabled:opacity-50"
+        onClick={() => setShowManage(true)}
+        className="rounded-md px-4 py-2 text-sm font-medium border border-slate-300 text-slate-700 hover:bg-slate-50 transition disabled:opacity-50"
       >
-        Unassign Technician
+        Manage Technicians
       </button>
 
-      {showConfirm && (
+      {showManage && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl p-6 w-full max-w-sm">
-            <h3 className="text-sm font-semibold text-slate-900 mb-1">
-              Remove {currentTechnicianName ?? "this technician"} from this job?
-            </h3>
-            <p className="text-xs text-slate-500 mb-4">
-              The request moves back to &ldquo;Team Assigned&rdquo;. No email is sent.
-            </p>
-            <div className="flex justify-end gap-2">
+            <h3 className="text-sm font-semibold text-slate-900 mb-3">Manage technicians</h3>
+            <div className="flex flex-col gap-2 mb-4 max-h-56 overflow-y-auto">
+              {crew.map((c) => (
+                <div
+                  key={c.technician_id}
+                  className="flex items-center justify-between border border-slate-200 rounded-md px-3 py-2"
+                >
+                  <div className="flex items-center gap-2 text-sm text-slate-700">
+                    <span>{c.full_name}</span>
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded-full ${
+                        c.accepted_at
+                          ? "bg-emerald-100 text-emerald-800"
+                          : "bg-amber-100 text-amber-800"
+                      }`}
+                    >
+                      {c.accepted_at ? "Accepted" : "Pending"}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={() => handleRemove(c.technician_id)}
+                    className="text-sm text-red-600 hover:underline disabled:opacity-50"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="border-t border-slate-200 pt-3">
+              <p className="text-xs text-slate-500 mb-2">Add another technician</p>
+              <div className="flex gap-2">
+                <select
+                  value={addId}
+                  onChange={(e) => setAddId(e.target.value)}
+                  className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                >
+                  <option value="">Select a technician…</option>
+                  {availableTechnicians.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.full_name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  disabled={pending || !addId}
+                  onClick={handleAdd}
+                  className="rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50 whitespace-nowrap"
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+            <div className="flex justify-end mt-4">
               <button
                 type="button"
-                onClick={() => setShowConfirm(false)}
+                onClick={() => setShowManage(false)}
                 className="rounded-md px-4 py-2 text-sm font-medium bg-white border border-slate-300 text-slate-700 hover:bg-slate-50"
               >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={pending}
-                onClick={handleUnassign}
-                className="rounded-md px-4 py-2 text-sm font-medium bg-red-600 text-white hover:opacity-90 disabled:opacity-50"
-              >
-                {pending ? "Removing…" : "Unassign"}
+                Done
               </button>
             </div>
           </div>
@@ -410,10 +457,35 @@ export function UnassignTechnicianControl({
   );
 }
 
+// The technician's own control -- only rendered for a crew member who
+// hasn't accepted yet. Once every crew member has tapped this, the
+// request auto-advances to "Dispatched" (handled server-side in
+// acceptJob/maybeAdvanceToDispatched, not here).
+export function AcceptJobControl({ requestId }: { requestId: string }) {
+  const [pending, startTransition] = useTransition();
+
+  function handleAccept() {
+    startTransition(() => {
+      acceptJob(requestId);
+    });
+  }
+
+  return (
+    <button
+      type="button"
+      disabled={pending}
+      onClick={handleAccept}
+      className="rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 transition disabled:opacity-50"
+    >
+      {pending ? "Accepting…" : "Accept Job"}
+    </button>
+  );
+}
+
 // Manager-only reassign/unassign for the coordinator owning a request --
-// same popup pattern as AssignTechnicianControl/UnassignTechnicianControl
-// above, but for owner_id instead of assigned_technician_id, and gated to
-// managers only (coordinators can't reassign themselves or each other).
+// same popup pattern as the technician crew controls above, but for
+// owner_id instead of a technician crew, and gated to managers only
+// (coordinators can't reassign themselves or each other).
 export function ReassignCoordinatorControl({
   requestId,
   coordinators,

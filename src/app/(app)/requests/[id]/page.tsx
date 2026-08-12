@@ -30,8 +30,9 @@ import {
   StatusButton,
   CommentBox,
   ApproveRejectControls,
-  AssignTechnicianControl,
-  UnassignTechnicianControl,
+  AssignTechniciansControl,
+  ManageTechniciansControl,
+  AcceptJobControl,
   ReassignCoordinatorControl,
   UnassignCoordinatorControl,
 } from "./actions-client";
@@ -107,7 +108,7 @@ export default async function RequestDetailPage({
   const { data: request } = await supabase
     .from("requests")
     .select(
-      "*, requestor:profiles!requests_requestor_id_fkey(full_name, email), approver:profiles!requests_approved_by_fkey(full_name), owner:profiles!requests_owner_id_fkey(full_name), assigned_technician:profiles!requests_assigned_technician_id_fkey(full_name), linked_project:projects!requests_project_id_fkey(name, deleted_at)"
+      "*, requestor:profiles!requests_requestor_id_fkey(full_name, email), approver:profiles!requests_approved_by_fkey(full_name), owner:profiles!requests_owner_id_fkey(full_name), linked_project:projects!requests_project_id_fkey(name, deleted_at)"
     )
     .eq("id", id)
     .single();
@@ -262,7 +263,7 @@ export default async function RequestDetailPage({
   const stageList = (stages ?? []) as WorkflowStage[];
   const availableTransitions = (transitions ?? []) as WorkflowTransition[];
   const isOwner = request.requestor_id === profile.id;
-  const isAssignedTechnician = request.assigned_technician_id === profile.id;
+
   const status = request.status as string;
 
   // A transition shows up if the current user's role is explicitly allowed,
@@ -276,6 +277,10 @@ export default async function RequestDetailPage({
     if (status === "submitted" && t.to_key === "under_review") return false;
     if (status === "completed" && t.to_key === "closed") return false;
     if (t.from_key === "on_site" && t.to_key === "completed") return false;
+    // Superseded by AcceptJobControl below -- accepting is now per-crew-
+    // member and the request only advances once everyone's accepted,
+    // which the old single generic transition button can't express.
+    if (t.from_key === "assigned" && t.to_key === "dispatched") return false;
     return profile.is_manager || t.allowed_roles.includes(profile.role);
   });
 
@@ -301,21 +306,19 @@ export default async function RequestDetailPage({
     !currentStage?.is_terminal &&
     !(isOwner && status === "returned_for_info");
 
-  // A technician can be assigned once the request is under a coordinator's
-  // care, and reassigned/unassigned any time after that up until the
-  // category's terminal stage -- same window as canManagerEditRequest's
-  // "still active" check, so the buttons appear/disappear together.
-  const hasTechnician = !!request.assigned_technician_id;
+  // A crew can be assigned once the request is under a coordinator's care,
+  // and managed (add/remove individual technicians) any time after that up
+  // until the category's terminal stage -- same window as
+  // canManagerEditRequest's "still active" check, so the buttons
+  // appear/disappear together.
   const canManageAssignment =
     can(profile, "assign_technician") &&
     status !== "submitted" &&
     !currentStage?.is_terminal &&
     status !== "completed";
-  const canAssignTechnician = canManageAssignment && !hasTechnician;
-  const canReassignTechnician = canManageAssignment && hasTechnician;
 
   let technicians: { id: string; full_name: string }[] = [];
-  if (canAssignTechnician || canReassignTechnician) {
+  if (canManageAssignment) {
     const { data: techs } = await supabase
       .from("profiles")
       .select("id, full_name")
@@ -324,6 +327,33 @@ export default async function RequestDetailPage({
       .order("full_name", { ascending: true });
     technicians = techs ?? [];
   }
+
+  // The crew currently on this request -- who's assigned, and who's
+  // accepted so far. Replaces the old single assigned_technician_id/
+  // assigned_technician join now that a job can have more than one
+  // technician (see migration 020).
+  const { data: crewRows } = await supabase
+    .from("request_technicians")
+    .select("technician_id, accepted_at, technician:profiles!request_technicians_technician_id_fkey(full_name)")
+    .eq("request_id", id)
+    .order("assigned_at", { ascending: true });
+
+  const crew = (crewRows ?? []).map((c) => ({
+    technician_id: c.technician_id as string,
+    accepted_at: c.accepted_at as string | null,
+    full_name: (c.technician as { full_name?: string } | null)?.full_name ?? "Unknown",
+  }));
+
+  const hasTechnician = crew.length > 0;
+  const canAssignTechnicians = canManageAssignment && !hasTechnician;
+  const canManageCrew = canManageAssignment && hasTechnician;
+  const availableTechnicians = technicians.filter(
+    (t) => !crew.some((c) => c.technician_id === t.id)
+  );
+
+  const myCrewRow = crew.find((c) => c.technician_id === profile.id);
+  const isAssignedTechnician = !!myCrewRow;
+  const canAcceptJob = !!myCrewRow && !myCrewRow.accepted_at && status === "assigned";
 
   return (
     <div className="p-8 max-w-4xl">
@@ -353,10 +383,24 @@ export default async function RequestDetailPage({
           {request.requestor?.full_name} on{" "}
           {format(parseISO(request.created_at), "MMM d, yyyy")}
         </p>
-        {request.assigned_technician?.full_name && (
-          <p className="text-sm text-slate-500 mt-0.5">
-            Technician: {request.assigned_technician.full_name}
-          </p>
+        {crew.length > 0 && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span className="text-sm text-slate-500">Technicians:</span>
+            {crew.map((c) => (
+              <span key={c.technician_id} className="flex items-center gap-1.5 text-sm text-slate-700">
+                {c.full_name}
+                <span
+                  className={`text-xs px-2 py-0.5 rounded-full ${
+                    c.accepted_at
+                      ? "bg-emerald-100 text-emerald-800"
+                      : "bg-amber-100 text-amber-800"
+                  }`}
+                >
+                  {c.accepted_at ? "Accepted" : "Pending"}
+                </span>
+              </span>
+            ))}
+          </div>
         )}
       </div>
 
@@ -369,9 +413,10 @@ export default async function RequestDetailPage({
             category={request.category}
           />
         )}
-        {canAssignTechnician && (
-          <AssignTechnicianControl requestId={id} technicians={technicians} mode="assign" />
+        {canAssignTechnicians && (
+          <AssignTechniciansControl requestId={id} technicians={technicians} />
         )}
+        {canAcceptJob && <AcceptJobControl requestId={id} />}
         {visibleTransitions.map((t) => (
           <StatusButton
             key={t.id}
@@ -397,18 +442,11 @@ export default async function RequestDetailPage({
             Edit &amp; Resubmit
           </Link>
         )}
-        {canReassignTechnician && (
-          <AssignTechnicianControl
+        {canManageCrew && (
+          <ManageTechniciansControl
             requestId={id}
-            technicians={technicians}
-            mode="reassign"
-            currentTechnicianName={request.assigned_technician?.full_name ?? null}
-          />
-        )}
-        {canReassignTechnician && (
-          <UnassignTechnicianControl
-            requestId={id}
-            currentTechnicianName={request.assigned_technician?.full_name ?? null}
+            crew={crew}
+            availableTechnicians={availableTechnicians}
           />
         )}
         {canManageCoordinatorAssignment && (

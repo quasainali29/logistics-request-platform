@@ -65,13 +65,19 @@ export async function GET(
 
   const supabase = await createClient();
 
-  const { data: request } = await supabase
-    .from("requests")
-    .select(
-      "*, requestor:profiles!requests_requestor_id_fkey(full_name), approver:profiles!requests_approved_by_fkey(full_name), owner:profiles!requests_owner_id_fkey(full_name), assigned_technician:profiles!requests_assigned_technician_id_fkey(full_name), linked_project:projects!requests_project_id_fkey(name, deleted_at)"
-    )
-    .eq("id", id)
-    .single();
+  const [{ data: request }, { data: crewRows }] = await Promise.all([
+    supabase
+      .from("requests")
+      .select(
+        "*, requestor:profiles!requests_requestor_id_fkey(full_name), approver:profiles!requests_approved_by_fkey(full_name), owner:profiles!requests_owner_id_fkey(full_name), linked_project:projects!requests_project_id_fkey(name, deleted_at)"
+      )
+      .eq("id", id)
+      .single(),
+    supabase
+      .from("request_technicians")
+      .select("technician:profiles!request_technicians_technician_id_fkey(full_name)")
+      .eq("request_id", id),
+  ]);
 
   if (!request) {
     return NextResponse.json({ error: "Request not found." }, { status: 404 });
@@ -120,13 +126,16 @@ export async function GET(
   const requestorName = (request.requestor as { full_name?: string } | null)?.full_name ?? "—";
   const approverName = (request.approver as { full_name?: string } | null)?.full_name ?? "—";
   const ownerName = (request.owner as { full_name?: string } | null)?.full_name ?? "—";
-  const technicianName =
-    (request.assigned_technician as { full_name?: string } | null)?.full_name ?? null;
-  // The technician who was on site is the more useful "assigned to" for a
-  // closure record than the coordinator who owns the request paperwork --
-  // falls back to the coordinator when no technician was ever assigned
-  // (the feature is optional; older closed requests won't have one).
-  const assignedTo = technicianName ?? ownerName;
+  const technicianNames = (crewRows ?? [])
+    .map((c) => (c.technician as { full_name?: string } | null)?.full_name)
+    .filter((name): name is string => !!name);
+  // The technician crew who was on site is the more useful "assigned to"
+  // for a closure record than the coordinator who owns the request
+  // paperwork -- falls back to the coordinator when no technician was ever
+  // assigned (the feature is optional; older closed requests won't have
+  // one). A job with more than one technician lists everyone, comma-
+  // separated.
+  const assignedTo = technicianNames.length > 0 ? technicianNames.join(", ") : ownerName;
 
   const linkedProject = request.linked_project as
     | { name: string; deleted_at: string | null }
