@@ -724,12 +724,10 @@ export default function RequestForm({
           </Field>
 
           <div>
-            <p className="text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
+            <p className="text-sm font-medium text-slate-700 mb-2 flex items-center gap-1.5">
               Items needed
               {highlighted.has("delivery_items") && (
-                <span className="text-[10px] font-normal text-[var(--accent)] bg-indigo-100 rounded px-1.5 py-0.5">
-                  AI-filled — check
-                </span>
+                <span className="text-[10px] font-normal text-[var(--accent)]">· AI-filled, check these</span>
               )}
             </p>
             <div className="space-y-3">
@@ -820,12 +818,10 @@ export default function RequestForm({
           </div>
 
           <div>
-            <p className="text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
+            <p className="text-sm font-medium text-slate-700 mb-2 flex items-center gap-1.5">
               Personnel needed
               {highlighted.has("labor_lines") && (
-                <span className="text-[10px] font-normal text-[var(--accent)] bg-indigo-100 rounded px-1.5 py-0.5">
-                  AI-filled — check
-                </span>
+                <span className="text-[10px] font-normal text-[var(--accent)]">· AI-filled, check these</span>
               )}
             </p>
             <div className="space-y-3">
@@ -1075,12 +1071,10 @@ export default function RequestForm({
           </Field>
 
           <div>
-            <p className="text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
+            <p className="text-sm font-medium text-slate-700 mb-2 flex items-center gap-1.5">
               Line items
               {highlighted.has("proc_items") && (
-                <span className="text-[10px] font-normal text-[var(--accent)] bg-indigo-100 rounded px-1.5 py-0.5">
-                  AI-filled — check
-                </span>
+                <span className="text-[10px] font-normal text-[var(--accent)]">· AI-filled, check these</span>
               )}
             </p>
             <div className="space-y-3">
@@ -1207,17 +1201,15 @@ function Field({
   const isHighlighted = !!name && highlighted.has(name);
   return (
     <div
-      className={
-        isHighlighted ? "rounded-md ring-1 ring-[var(--accent)] bg-indigo-50/50 p-2 -m-2" : undefined
-      }
+      className={`border-l-2 pl-2.5 -ml-2.5 transition-colors ${
+        isHighlighted ? "border-[var(--accent)]" : "border-transparent"
+      }`}
     >
-      <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2">
+      <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-1.5">
         {label}
         {required && <span className="text-red-500 ml-0.5">*</span>}
         {isHighlighted && (
-          <span className="text-[10px] font-normal text-[var(--accent)] bg-indigo-100 rounded px-1.5 py-0.5">
-            AI-filled — check
-          </span>
+          <span className="text-[10px] font-normal text-[var(--accent)]">· AI-filled, check this</span>
         )}
       </label>
       {children}
