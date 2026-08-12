@@ -213,8 +213,12 @@ Rules:
       return NextResponse.json({ error: "Couldn't parse that description. Try rephrasing." }, { status: 502 });
     }
     toolInput = toolUse.input as Record<string, unknown>;
-  } catch {
-    return NextResponse.json({ error: "Auto-fill is temporarily unavailable. Try again shortly." }, { status: 502 });
+  } catch (err) {
+    // TEMP-DEBUG: surfaced to diagnose the initial wiring; will be
+    // replaced with a generic message once confirmed working.
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error("auto-fill anthropic call failed:", detail);
+    return NextResponse.json({ error: "Auto-fill is temporarily unavailable. Try again shortly.", debug: detail }, { status: 502 });
   }
 
   const category = pick<Category>(toolInput.category, CATEGORIES);
