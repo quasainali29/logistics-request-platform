@@ -1,11 +1,87 @@
 "use client";
 
-import { useState, useRef } from "react";
+import {
+  useState,
+  useRef,
+  useEffect,
+  useContext,
+  createContext,
+  isValidElement,
+  type ReactNode,
+  type SyntheticEvent,
+} from "react";
 import { createRequest, updateRequest, managerEditRequest } from "../actions";
 import { MAINTENANCE_TYPES, PURCHASING_CATEGORIES, NATURE_OF_WORK_OPTIONS, LABOR_TYPES, type Category, type Project, type Department } from "@/lib/types";
 import { uploadAttachment, uploadAttachments } from "@/lib/uploadAttachment";
 
 type Attachment = { name: string; url: string };
+
+// -- Describe-and-fill (auto-fill) types --------------------------------
+// Shape returned by POST /api/requests/auto-fill. Every field is optional
+// on purpose: the server only fills in what it's confident about, and the
+// requester reviews/edits everything before submitting -- this never
+// submits on its own.
+interface AutoFillItem {
+  item_name?: string;
+  item_description?: string;
+  required_quantity?: number | null;
+  quantity?: number | null;
+  current_location?: string | null;
+  purchasing_link?: string | null;
+}
+
+interface AutoFillResult {
+  category: "delivery" | "labor" | "maintenance" | "procurement" | null;
+  title: string | null;
+  priority: "low" | "medium" | "high" | "urgent" | null;
+  project_id: string | null;
+  department: string | null;
+  date_required: string | null;
+  conclude_date: string | null;
+  description: string | null;
+  special_instructions: string | null;
+  delivery: {
+    delivery_location: string | null;
+    delivery_requested_date: string | null;
+    delivery_requested_time: string | null;
+    items: AutoFillItem[];
+  } | null;
+  maintenance: {
+    location_area: string | null;
+    maintenance_type: string | null;
+    urgency: "low" | "medium" | "high" | "urgent" | null;
+    maintenance_date: string | null;
+    maintenance_time: string | null;
+  } | null;
+  procurement: {
+    purchasing_category: string | null;
+    purchasing_category_other: string | null;
+    vendor: string | null;
+    procurement_needed_by: string | null;
+    items: AutoFillItem[];
+  } | null;
+  labor: {
+    labor_date_from: string | null;
+    labor_date_to: string | null;
+    lines: { personnel_type: string; nature_of_work?: string | null; quantity?: number | null }[];
+  } | null;
+}
+
+// Tracks which field names were just populated by auto-fill, so Field()
+// can render an "AI-filled" badge -- cleared per-field the moment the
+// requester edits that field (see handleFieldTouched).
+const HighlightContext = createContext<Set<string>>(new Set());
+
+function fieldNameOf(children: ReactNode): string | undefined {
+  const nodes = Array.isArray(children) ? children : [children];
+  for (const node of nodes) {
+    if (isValidElement(node)) {
+      const name = (node.props as { name?: unknown }).name;
+      if (typeof name === "string") return name;
+    }
+  }
+  return undefined;
+}
 
 interface DeliveryItemRow {
   key: number;
@@ -141,6 +217,198 @@ export default function RequestForm({
   const [submitError, setSubmitError] = useState("");
   const formRef = useRef<HTMLFormElement>(null);
 
+  const [describeText, setDescribeText] = useState("");
+  const [autoFilling, setAutoFilling] = useState(false);
+  const [autoFillError, setAutoFillError] = useState("");
+  const [highlighted, setHighlighted] = useState<Set<string>>(new Set());
+  // Holds a category-specific payload when auto-fill switches the category
+  // -- the detail section (delivery/maintenance/procurement/labor) doesn't
+  // exist in the DOM yet at that point, so applying it waits for the
+  // effect below, which runs once the section has mounted.
+  const pendingCategoryFillRef = useRef<AutoFillResult | null>(null);
+
+  function setFieldValue(name: string, value: string | null | undefined) {
+    if (!value) return;
+    const el = formRef.current?.elements.namedItem(name) as
+      | HTMLInputElement
+      | HTMLSelectElement
+      | HTMLTextAreaElement
+      | null;
+    if (el) el.value = value;
+  }
+
+  function applyCategoryFields(data: AutoFillResult) {
+    const newHighlights: string[] = [];
+    if (data.category === "delivery" && data.delivery) {
+      const d = data.delivery;
+      setFieldValue("delivery_location", d.delivery_location);
+      setFieldValue("delivery_requested_date", d.delivery_requested_date);
+      setFieldValue("delivery_requested_time", d.delivery_requested_time);
+      if (d.delivery_location) newHighlights.push("delivery_location");
+      if (d.delivery_requested_date) newHighlights.push("delivery_requested_date");
+      if (d.delivery_requested_time) newHighlights.push("delivery_requested_time");
+      if (d.items?.length) {
+        setDeliveryItemRows(
+          d.items.map((it) => ({
+            key: nextKey(),
+            item_name: it.item_name ?? "",
+            required_quantity: it.required_quantity ?? undefined,
+            current_location: it.current_location ?? undefined,
+          }))
+        );
+        newHighlights.push("delivery_items");
+      }
+    } else if (data.category === "maintenance" && data.maintenance) {
+      const m = data.maintenance;
+      setFieldValue("location_area", m.location_area);
+      setFieldValue("maintenance_type", m.maintenance_type);
+      setFieldValue("urgency", m.urgency);
+      setFieldValue("maintenance_date", m.maintenance_date);
+      setFieldValue("maintenance_time", m.maintenance_time);
+      if (m.location_area) newHighlights.push("location_area");
+      if (m.maintenance_type) newHighlights.push("maintenance_type");
+      if (m.urgency) newHighlights.push("urgency");
+      if (m.maintenance_date) newHighlights.push("maintenance_date");
+      if (m.maintenance_time) newHighlights.push("maintenance_time");
+    } else if (data.category === "procurement" && data.procurement) {
+      const p = data.procurement;
+      if (p.purchasing_category) {
+        setPurchasingCategory(p.purchasing_category);
+        newHighlights.push("purchasing_category");
+      }
+      setFieldValue("vendor", p.vendor);
+      setFieldValue("purchasing_category_other", p.purchasing_category_other);
+      setFieldValue("procurement_needed_by", p.procurement_needed_by);
+      if (p.vendor) newHighlights.push("vendor");
+      if (p.purchasing_category_other) newHighlights.push("purchasing_category_other");
+      if (p.procurement_needed_by) newHighlights.push("procurement_needed_by");
+      if (p.items?.length) {
+        setProcItemRows(
+          p.items.map((it) => ({
+            key: nextKey(),
+            item_description: it.item_description ?? "",
+            quantity: it.quantity ?? undefined,
+            purchasing_link: it.purchasing_link ?? undefined,
+          }))
+        );
+        newHighlights.push("proc_items");
+      }
+    } else if (data.category === "labor" && data.labor) {
+      const l = data.labor;
+      setFieldValue("labor_date_from", l.labor_date_from);
+      setFieldValue("labor_date_to", l.labor_date_to);
+      if (l.labor_date_from) newHighlights.push("labor_date_from");
+      if (l.labor_date_to) newHighlights.push("labor_date_to");
+      if (l.lines?.length) {
+        setLaborRows(
+          l.lines.map((row) => ({
+            key: nextKey(),
+            personnel_type: row.personnel_type,
+            nature_of_work: row.nature_of_work ?? undefined,
+            quantity: row.quantity ?? undefined,
+          }))
+        );
+        newHighlights.push("labor_lines");
+      }
+    }
+    if (newHighlights.length) {
+      setHighlighted((prev) => new Set([...prev, ...newHighlights]));
+    }
+  }
+
+  useEffect(() => {
+    const pending = pendingCategoryFillRef.current;
+    if (pending && category === pending.category) {
+      pendingCategoryFillRef.current = null;
+      applyCategoryFields(pending);
+    }
+    // applyCategoryFields is stable enough for this purpose -- it only
+    // reads refs/setters, not values that would need to retrigger this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category]);
+
+  function applyCommonFields(data: AutoFillResult) {
+    const newHighlights: string[] = [];
+    setFieldValue("title", data.title);
+    if (data.title) newHighlights.push("title");
+    setFieldValue("date_required", data.date_required);
+    if (data.date_required) newHighlights.push("date_required");
+    setFieldValue("conclude_date", data.conclude_date);
+    if (data.conclude_date) newHighlights.push("conclude_date");
+    setFieldValue("description", data.description);
+    if (data.description) newHighlights.push("description");
+    setFieldValue("special_instructions", data.special_instructions);
+    if (data.special_instructions) newHighlights.push("special_instructions");
+    if (data.priority) {
+      setFieldValue("priority", data.priority);
+      newHighlights.push("priority");
+    }
+    if (data.department) {
+      setFieldValue("department", data.department);
+      newHighlights.push("department");
+    }
+    if (newHighlights.length) {
+      setHighlighted((prev) => new Set([...prev, ...newHighlights]));
+    }
+  }
+
+  async function handleAutoFill() {
+    if (!describeText.trim()) {
+      setAutoFillError("Type a description first.");
+      return;
+    }
+    setAutoFilling(true);
+    setAutoFillError("");
+    try {
+      const res = await fetch("/api/requests/auto-fill", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: describeText }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setAutoFillError(json.error || "Couldn't auto-fill that. Try rephrasing.");
+        return;
+      }
+      const data = json.result as AutoFillResult;
+      applyCommonFields(data);
+      if (data.project_id) {
+        setProjectChoice(data.project_id);
+        setHighlighted((prev) => new Set(prev).add("project_id"));
+      }
+      if (data.category) {
+        setHighlighted((prev) => new Set(prev).add("category"));
+        if (category === data.category) {
+          applyCategoryFields(data);
+        } else {
+          pendingCategoryFillRef.current = data;
+          setCategory(data.category);
+        }
+      }
+    } catch {
+      setAutoFillError("Couldn't reach auto-fill. Try again.");
+    } finally {
+      setAutoFilling(false);
+    }
+  }
+
+  function handleFieldTouched(e: SyntheticEvent<HTMLFormElement>) {
+    const target = e.target as HTMLElement;
+    const name = target.getAttribute("name");
+    if (!name) return;
+    let key = name;
+    if (key.startsWith("delivery_item_")) key = "delivery_items";
+    else if (key.startsWith("proc_item_")) key = "proc_items";
+    else if (key.startsWith("labor_type") || key.startsWith("labor_nature") || key.startsWith("labor_qty"))
+      key = "labor_lines";
+    setHighlighted((prev) => {
+      if (!prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
+  }
+
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSubmitError("");
@@ -239,7 +507,38 @@ export default function RequestForm({
   }
 
   return (
-    <form ref={formRef} onSubmit={handleSubmit} className="space-y-8 max-w-2xl">
+    <form
+      ref={formRef}
+      onSubmit={handleSubmit}
+      onChange={handleFieldTouched}
+      onInput={handleFieldTouched}
+      className="space-y-8 max-w-2xl"
+    >
+      <HighlightContext.Provider value={highlighted}>
+      {!isEdit && (
+        <section className="bg-indigo-50/60 border border-indigo-100 rounded-xl p-6 space-y-3">
+          <p className="text-sm font-semibold text-slate-900">Describe your request</p>
+          <textarea
+            rows={3}
+            value={describeText}
+            onChange={(e) => setDescribeText(e.target.value)}
+            placeholder="e.g. Need someone to deliver 2 folding tables and 10 chairs from the warehouse to Inflata Park by Friday, it's for a birthday event so kind of urgent"
+            className={inputClass}
+          />
+          {autoFillError && <p className="text-xs text-red-600">{autoFillError}</p>}
+          <div className="flex items-center gap-3 flex-wrap">
+            <button
+              type="button"
+              onClick={handleAutoFill}
+              disabled={autoFilling}
+              className="bg-[var(--accent)] text-white rounded-md px-4 py-2 text-sm font-medium hover:opacity-90 transition disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {autoFilling ? "Filling…" : "Auto-fill form"}
+            </button>
+            <p className="text-xs text-slate-500">Fields it fills are marked below — review before submitting.</p>
+          </div>
+        </section>
+      )}
       {submitError && (
         <div className="rounded-md border border-red-200 bg-red-50 text-red-700 text-sm px-4 py-3">
           {submitError}
@@ -425,7 +724,14 @@ export default function RequestForm({
           </Field>
 
           <div>
-            <p className="text-sm font-medium text-slate-700 mb-2">Items needed</p>
+            <p className="text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
+              Items needed
+              {highlighted.has("delivery_items") && (
+                <span className="text-[10px] font-normal text-[var(--accent)] bg-indigo-100 rounded px-1.5 py-0.5">
+                  AI-filled — check
+                </span>
+              )}
+            </p>
             <div className="space-y-3">
               {deliveryItemRows.map((row, i) => (
                 <div
@@ -514,7 +820,14 @@ export default function RequestForm({
           </div>
 
           <div>
-            <p className="text-sm font-medium text-slate-700 mb-2">Personnel needed</p>
+            <p className="text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
+              Personnel needed
+              {highlighted.has("labor_lines") && (
+                <span className="text-[10px] font-normal text-[var(--accent)] bg-indigo-100 rounded px-1.5 py-0.5">
+                  AI-filled — check
+                </span>
+              )}
+            </p>
             <div className="space-y-3">
               {laborRows.map((row, i) => (
                 <div
@@ -762,7 +1075,14 @@ export default function RequestForm({
           </Field>
 
           <div>
-            <p className="text-sm font-medium text-slate-700 mb-2">Line items</p>
+            <p className="text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
+              Line items
+              {highlighted.has("proc_items") && (
+                <span className="text-[10px] font-normal text-[var(--accent)] bg-indigo-100 rounded px-1.5 py-0.5">
+                  AI-filled — check
+                </span>
+              )}
+            </p>
             <div className="space-y-3">
               {procItemRows.map((row, i) => (
                 <div
@@ -862,6 +1182,7 @@ export default function RequestForm({
           ? "Save & Resubmit"
           : "Submit request"}
       </button>
+      </HighlightContext.Provider>
     </form>
   );
 }
@@ -878,14 +1199,26 @@ function Field({
   required,
 }: {
   label: string;
-  children: React.ReactNode;
+  children: ReactNode;
   required?: boolean;
 }) {
+  const highlighted = useContext(HighlightContext);
+  const name = fieldNameOf(children);
+  const isHighlighted = !!name && highlighted.has(name);
   return (
-    <div>
-      <label className="block text-sm font-medium text-slate-700 mb-1">
+    <div
+      className={
+        isHighlighted ? "rounded-md ring-1 ring-[var(--accent)] bg-indigo-50/50 p-2 -m-2" : undefined
+      }
+    >
+      <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-2">
         {label}
         {required && <span className="text-red-500 ml-0.5">*</span>}
+        {isHighlighted && (
+          <span className="text-[10px] font-normal text-[var(--accent)] bg-indigo-100 rounded px-1.5 py-0.5">
+            AI-filled — check
+          </span>
+        )}
       </label>
       {children}
     </div>
