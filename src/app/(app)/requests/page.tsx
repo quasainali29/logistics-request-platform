@@ -219,8 +219,32 @@ export default async function RequestsPage({
   // Status filter options -- deduped by key across every category's
   // configured workflow stages, since the filter applies a plain
   // `status = key` match regardless of which category the request is in.
+  //
+  // Two things need normalizing here rather than showing workflow_stages
+  // verbatim:
+  //  - "planning", "under_review", and "rejected" are configured stages
+  //    that no code path in the app ever actually sets on a request
+  //    (the submitted->review step and the standalone "rejected" terminal
+  //    status were both superseded by the current approve/reject flow,
+  //    which uses "returned_for_info" and "closed" instead). Filtering by
+  //    any of these always returns zero rows, so they're excluded here
+  //    entirely rather than left as dead options.
+  //  - "under_process" is labeled "Under Process" for delivery/labor/
+  //    procurement but "Team Assigned" for maintenance only. Since this
+  //    filter matches the status across every category at once, it needs
+  //    one canonical label rather than whichever category's row happens
+  //    to be deduped last -- each category's own request badges keep
+  //    their own configured label, this only affects the shared filter.
+  const DEAD_STATUS_KEYS = new Set(["planning", "under_review", "rejected"]);
+  const CANONICAL_STATUS_LABELS: Record<string, string> = {
+    under_process: "Under Process",
+  };
   const statusOptions = Array.from(
-    new Map(stageList.map((s) => [s.key, { value: s.key, label: s.label }])).values()
+    new Map(
+      stageList
+        .filter((s) => !DEAD_STATUS_KEYS.has(s.key))
+        .map((s) => [s.key, { value: s.key, label: CANONICAL_STATUS_LABELS[s.key] ?? s.label }])
+    ).values()
   );
 
   function pageHref(p: number) {
