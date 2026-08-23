@@ -13,6 +13,7 @@ import {
 import { createRequest, updateRequest, managerEditRequest } from "../actions";
 import { MAINTENANCE_TYPES, PURCHASING_CATEGORIES, NATURE_OF_WORK_OPTIONS, LABOR_TYPES, type Category, type Project, type Department } from "@/lib/types";
 import { uploadAttachment, uploadAttachments } from "@/lib/uploadAttachment";
+import { compressImage, compressImages } from "@/lib/compressImage";
 
 type Attachment = { name: string; url: string };
 
@@ -432,11 +433,13 @@ export default function RequestForm({
         const photoFiles = (raw.getAll("maintenance_photos") as File[])
           .filter((f) => f && f.size > 0)
           .slice(0, 6);
-        const photos = await uploadAttachments(photoFiles, "maintenance/pending");
+        const compressedPhotoFiles = await compressImages(photoFiles);
+        const photos = await uploadAttachments(compressedPhotoFiles, "maintenance/pending");
         out.append("maintenance_photos_json", JSON.stringify(photos));
 
         const permitFile = raw.get("maintenance_work_permit") as File | null;
-        const permit = await uploadAttachment(permitFile, "maintenance/pending");
+        const compressedPermitFile = permitFile ? await compressImage(permitFile) : null;
+        const permit = await uploadAttachment(compressedPermitFile, "maintenance/pending");
         out.append("maintenance_work_permit_json", JSON.stringify(permit ? [permit] : []));
 
         // Edit mode: if the requester doesn't pick new files, the server
@@ -456,7 +459,8 @@ export default function RequestForm({
 
       if (category === "delivery") {
         const permitFile = raw.get("delivery_permit") as File | null;
-        const permit = await uploadAttachment(permitFile, "delivery/pending");
+        const compressedPermitFile = permitFile ? await compressImage(permitFile) : null;
+        const permit = await uploadAttachment(compressedPermitFile, "delivery/pending");
         out.append("delivery_permit_json", JSON.stringify(permit ? [permit] : []));
 
         if (isEdit) {
@@ -466,7 +470,7 @@ export default function RequestForm({
           );
         }
 
-        const imageFiles = raw.getAll("delivery_item_image[]") as File[];
+        const imageFiles = await compressImages(raw.getAll("delivery_item_image[]") as File[]);
         const images = await Promise.all(
           imageFiles.map((f) => uploadAttachment(f, "delivery/pending/items"))
         );
@@ -477,7 +481,7 @@ export default function RequestForm({
       }
 
       if (category === "procurement") {
-        const imageFiles = raw.getAll("proc_item_image[]") as File[];
+        const imageFiles = await compressImages(raw.getAll("proc_item_image[]") as File[]);
         const images = await Promise.all(
           imageFiles.map((f) => uploadAttachment(f, "procurement/pending/items"))
         );

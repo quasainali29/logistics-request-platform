@@ -1,7 +1,19 @@
 "use client";
 
-import { useRef, useState, useTransition, type PointerEvent } from "react";
+import { useRef, useState, type PointerEvent } from "react";
 import { technicianCompleteJob } from "../../actions";
+import { uploadAttachments } from "@/lib/uploadAttachment";
+import { compressImages } from "@/lib/compressImage";
+
+function isNextRedirectError(err: unknown): boolean {
+  return (
+    !!err &&
+    typeof err === "object" &&
+    "digest" in err &&
+    typeof (err as { digest?: unknown }).digest === "string" &&
+    (err as { digest: string }).digest.startsWith("NEXT_REDIRECT")
+  );
+}
 
 const SIGNER_ROLES: { value: string; label: string }[] = [
   { value: "site_supervisor", label: "Site Supervisor" },
@@ -10,8 +22,10 @@ const SIGNER_ROLES: { value: string; label: string }[] = [
 ];
 
 export function CompleteJobForm({ requestId }: { requestId: string }) {
-  const [pending, startTransition] = useTransition();
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
   const [photos, setPhotos] = useState<File[]>([]);
+  const [compressing, setCompressing] = useState(false);
   const [notes, setNotes] = useState("");
   const [signedByName, setSignedByName] = useState("");
   const [signedByRole, setSignedByRole] = useState("site_supervisor");
@@ -68,33 +82,60 @@ export function CompleteJobForm({ requestId }: { requestId: string }) {
     setHasSignature(false);
   }
 
-  function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
-    setPhotos((prev) => [...prev, ...files]);
     e.target.value = "";
+    if (files.length === 0) return;
+    setCompressing(true);
+    try {
+      // Compress up front, before these ever get added to state or
+      // uploaded -- keeps every photo well under the size that used to
+      // make submission fail once real camera photos were attached.
+      const compressed = await compressImages(files);
+      setPhotos((prev) => [...prev, ...compressed]);
+    } finally {
+      setCompressing(false);
+    }
   }
 
   function removePhoto(index: number) {
     setPhotos((prev) => prev.filter((_, i) => i !== index));
   }
 
-  const canSubmit = hasSignature && signedByName.trim().length > 0 && !pending;
+  const canSubmit = hasSignature && signedByName.trim().length > 0 && !submitting && !compressing;
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (!canSubmit) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const formData = new FormData();
-    photos.forEach((file) => formData.append("photos", file));
-    formData.append("notes", notes);
-    formData.append("signed_by_name", signedByName.trim());
-    formData.append("signed_by_role", signedByRole);
-    formData.append("signature", canvas.toDataURL("image/png"));
+    setSubmitError("");
+    setSubmitting(true);
+    try {
+      // Photos go straight to Supabase Storage from the browser, same as
+      // every other attachment in the app -- only the resulting URLs (a
+      // small JSON string) go to the server action. Sending the raw files
+      // themselves through the action was what made submission silently
+      // fail once real camera photos were attached: it blew past the
+      // Server Action body-size limit with no error shown to the user.
+      const uploaded = await uploadAttachments(photos, `closeout/${requestId}`);
 
-    startTransition(() => {
-      technicianCompleteJob(requestId, formData);
-    });
+      const formData = new FormData();
+      formData.append("photos_json", JSON.stringify(uploaded));
+      formData.append("notes", notes);
+      formData.append("signed_by_name", signedByName.trim());
+      formData.append("signed_by_role", signedByRole);
+      formData.append("signature", canvas.toDataURL("image/png"));
+
+      await technicianCompleteJob(requestId, formData);
+      setSubmitting(false);
+    } catch (err) {
+      if (isNextRedirectError(err)) throw err;
+      setSubmitError(
+        err instanceof Error ? err.message : "Something went wrong. Please try again."
+      );
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -126,14 +167,15 @@ export function CompleteJobForm({ requestId }: { requestId: string }) {
             <input
               type="file"
               accept="image/*"
-              capture="environment"
               multiple
               onChange={handlePhotoChange}
               className="hidden"
             />
           </label>
         </div>
-        <p className="text-xs text-slate-400">Tap + to take a photo or choose from your gallery.</p>
+        <p className="text-xs text-slate-400">
+          {compressing ? "Optimizing photo…" : "Tap + to take a photo or choose from your gallery."}
+        </p>
       </section>
 
       {/* Notes */}
@@ -204,13 +246,19 @@ export function CompleteJobForm({ requestId }: { requestId: string }) {
         </div>
       </section>
 
+      {submitError && (
+        <div className="rounded-md border border-red-200 bg-red-50 text-red-700 text-sm px-4 py-3">
+          {submitError}
+        </div>
+      )}
+
       <button
         type="button"
         disabled={!canSubmit}
         onClick={handleSubmit}
         className="w-full rounded-md py-3 text-sm font-semibold text-white bg-[var(--accent)] hover:opacity-90 transition disabled:opacity-50"
       >
-        {pending ? "Submitting…" : "Submit & Complete Job"}
+        {submitting ? "Submitting…" : "Submit & Complete Job"}
       </button>
       <p className="text-center text-xs text-slate-400">
         This marks the request Completed and notifies the coordinator.

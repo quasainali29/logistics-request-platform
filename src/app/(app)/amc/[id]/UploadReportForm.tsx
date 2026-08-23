@@ -2,6 +2,7 @@
 
 import { useState, useTransition, type FormEvent } from "react";
 import { uploadAttachments } from "@/lib/uploadAttachment";
+import { compressImages } from "@/lib/compressImage";
 import { logAmcMaintenanceVisit } from "../actions";
 
 export default function UploadReportForm({
@@ -24,7 +25,8 @@ export default function UploadReportForm({
 
     startTransition(async () => {
       try {
-        const reportFiles = await uploadAttachments(files, `amc/${contractId}`);
+        const compressedFiles = await compressImages(files);
+        const reportFiles = await uploadAttachments(compressedFiles, `amc/${contractId}`);
         await logAmcMaintenanceVisit(contractId, {
           performed_date: String(formData.get("performed_date") ?? new Date().toISOString().slice(0, 10)),
           report_files: reportFiles,

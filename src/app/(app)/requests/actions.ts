@@ -44,15 +44,6 @@ async function uploadOne(
   return { name: file.name || "file", url: data.publicUrl };
 }
 
-async function uploadMany(
-  supabase: SupabaseClient,
-  folder: string,
-  files: File[]
-): Promise<AttachmentFile[]> {
-  const results = await Promise.all(files.map((f) => uploadOne(supabase, folder, f)));
-  return results.filter((r): r is AttachmentFile => r !== null);
-}
-
 // createRequest's attachments (photos, permits, item reference images) are
 // uploaded directly to Supabase Storage from the browser first (see
 // src/lib/uploadAttachment.ts) — that sidesteps Vercel's Server Action
@@ -1510,7 +1501,11 @@ export async function technicianCompleteJob(requestId: string, formData: FormDat
   const signedByName = (formData.get("signed_by_name") as string) || null;
   const signedByRole = (formData.get("signed_by_role") as string) || null;
   const signatureDataUrl = (formData.get("signature") as string) || "";
-  const photoFiles = (formData.getAll("photos") as File[]).filter((f) => f && f.size > 0);
+  // Photos arrive as an already-uploaded {name, url} array (see
+  // CompleteJobForm.tsx) -- raw File objects used to be sent straight
+  // through this Server Action, which silently failed once real
+  // camera photos pushed the request past the body-size limit.
+  const photos = parseAttachmentArray(formData, "photos_json");
 
   if (!signatureDataUrl || !signedByName || !signedByRole) {
     redirect(
@@ -1519,8 +1514,6 @@ export async function technicianCompleteJob(requestId: string, formData: FormDat
       )}`
     );
   }
-
-  const photos = await uploadMany(supabase, `closeout/${requestId}`, photoFiles);
 
   // The signature arrives as a data URL (canvas.toDataURL()) rather than a
   // File -- decode it into one so it goes through the same uploadOne()
