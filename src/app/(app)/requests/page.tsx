@@ -93,6 +93,18 @@ export default async function RequestsPage({
   // to typecheck.
   const today = new Date().toISOString().slice(0, 10);
 
+  // Fetched up front (rather than after the query blocks below, where it
+  // used to live) so the "Overdue" due-date filter can exclude terminal
+  // statuses -- see terminalStatusKeys below. A request whose (category,
+  // status) pair is marked terminal in the workflow builder (currently
+  // "completed", "closed", and "rejected" everywhere) is done, so it
+  // should never show up under "Overdue" regardless of date_required,
+  // matching the red-highlight logic RequestsTable.tsx already applies.
+  const stageList = await getWorkflowStages();
+  const terminalStatusKeys = Array.from(
+    new Set(stageList.filter((s) => s.is_terminal).map((s) => s.key))
+  );
+
   let requests: Array<Record<string, unknown>> = [];
   let total = 0;
 
@@ -121,7 +133,10 @@ export default async function RequestsPage({
     if (search) query = query.ilike("request_number", `%${search}%`);
     if (dateFrom) query = query.gte("created_at", `${dateFrom}T00:00:00`);
     if (dateTo) query = query.lte("created_at", `${dateTo}T23:59:59`);
-    if (due === "overdue") query = query.lt("date_required", today);
+    if (due === "overdue") {
+      query = query.lt("date_required", today);
+      if (terminalStatusKeys.length) query = query.not("status", "in", `(${terminalStatusKeys.join(",")})`);
+    }
     else if (due === "next7" || due === "next30") {
       const upper = new Date();
       upper.setDate(upper.getDate() + (due === "next7" ? 7 : 30));
@@ -161,7 +176,10 @@ export default async function RequestsPage({
     if (search) query = query.ilike("request_number", `%${search}%`);
     if (dateFrom) query = query.gte("created_at", `${dateFrom}T00:00:00`);
     if (dateTo) query = query.lte("created_at", `${dateTo}T23:59:59`);
-    if (due === "overdue") query = query.lt("date_required", today);
+    if (due === "overdue") {
+      query = query.lt("date_required", today);
+      if (terminalStatusKeys.length) query = query.not("status", "in", `(${terminalStatusKeys.join(",")})`);
+    }
     else if (due === "next7" || due === "next30") {
       const upper = new Date();
       upper.setDate(upper.getDate() + (due === "next7" ? 7 : 30));
@@ -178,7 +196,6 @@ export default async function RequestsPage({
     total = count ?? 0;
   }
 
-  const stageList = await getWorkflowStages();
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   // Requestor filter options -- staff only, since non-staff can only ever
