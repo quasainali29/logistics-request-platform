@@ -111,6 +111,11 @@ export interface RequestRow {
   description: string | null;
   special_instructions: string | null;
   owner_id: string | null;
+  // Set whenever owner_id changes (see migration 021) -- the coordinator
+  // equivalent of request_technicians.assigned_at, used by dashboards to
+  // show requests newly routed to a coordinator rather than just recently
+  // touched (updated_at changes on unrelated edits too).
+  owner_assigned_at: string | null;
   // assigned_technician_id is frozen historical data as of migration 020 --
   // a request's technician crew now lives in request_technicians (a job can
   // have more than one). The column is kept in the DB for rollback safety

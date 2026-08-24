@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { getProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -5,6 +6,7 @@ import {
   statusColor,
   PRIORITY_COLORS,
   CATEGORY_LABELS,
+  type WorkflowStage,
 } from "@/lib/types";
 import { getWorkflowStages } from "@/lib/cachedLookups";
 import Link from "next/link";
@@ -197,6 +199,26 @@ export default async function DashboardPage({
       count: cohort.filter((r) => r.priority === p).length,
     }));
 
+    // "New jobs" is a fixed trailing 2-day window on assigned_at,
+    // independent of the period filter above -- it answers "what just
+    // landed on my plate" regardless of what date range is selected for
+    // the rest of the page, which is why it's computed from the full
+    // `jobs` list rather than `cohort`.
+    const twoDaysAgo = subDays(new Date(), 2);
+    const newJobs = jobs
+      .filter((r) => parseISO(r.assigned_at) >= twoDaysAgo)
+      .sort((a, b) => parseISO(b.assigned_at).getTime() - parseISO(a.assigned_at).getTime());
+
+    const overdueJobs = cohort
+      .filter(
+        (r) =>
+          r.date_required &&
+          isPast(parseISO(r.date_required)) &&
+          !isToday(parseISO(r.date_required)) &&
+          !isTerminal(r.category, r.status)
+      )
+      .sort((a, b) => parseISO(a.date_required as string).getTime() - parseISO(b.date_required as string).getTime());
+
     const metrics = [
       {
         label: "Assigned in period",
@@ -259,38 +281,38 @@ export default async function DashboardPage({
           <MixCard title="Priority mix" segments={priorityMix} palette={PRIORITY_PALETTE} />
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-xl p-5">
-          <h2 className="text-sm font-semibold text-slate-900 mb-3">Today's Jobs</h2>
-          {dueToday.length === 0 ? (
-            <p className="text-sm text-slate-400">Nothing due today.</p>
-          ) : (
-            <ul className="space-y-2">
-              {dueToday.map((r) => (
-                <li key={r.id}>
-                  <Link
-                    href={`/requests/${r.id}`}
-                    className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-slate-50 border border-transparent hover:border-slate-200 transition"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm text-slate-900 truncate">{r.title}</p>
-                      <p className="text-xs text-slate-500">
-                        {r.request_number} · {CATEGORY_LABELS[r.category as keyof typeof CATEGORY_LABELS]}
-                      </p>
-                    </div>
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${statusColor(
-                        r.category,
-                        r.status,
-                        stageList
-                      )}`}
-                    >
-                      {formatStatusLabel(r.category, r.status, stageList)}
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
+        <div className="space-y-4">
+          <RequestMiniTable
+            title="Today's jobs"
+            rows={dueToday}
+            stageList={stageList}
+            emptyText="Nothing due today."
+            extraHeader="Due"
+            renderExtra={(r) => (r.date_required ? format(parseISO(r.date_required), "MMM d") : "—")}
+          />
+          <RequestMiniTable
+            title="New jobs"
+            meta="(assigned in the last 2 days)"
+            rows={newJobs.slice(0, 5)}
+            stageList={stageList}
+            emptyText="No jobs assigned to you in the last 2 days."
+            extraHeader="Assigned"
+            renderExtra={(r) => format(parseISO((r as TechJob).assigned_at), "MMM d, h:mm a")}
+          />
+          <RequestMiniTable
+            title="Overdue jobs"
+            meta={overdueJobs.length > 0 ? `(${overdueJobs.length})` : undefined}
+            rows={overdueJobs.slice(0, 5)}
+            stageList={stageList}
+            emptyText="Nothing overdue."
+            extraHeader="Overdue by"
+            renderExtra={(r) =>
+              `${differenceInCalendarDays(new Date(), parseISO(r.date_required as string))} days`
+            }
+            moreCount={Math.max(0, overdueJobs.length - 5)}
+            moreHref="/requests?due=overdue"
+            moreLabel="View all overdue"
+          />
         </div>
       </div>
     );
@@ -305,7 +327,7 @@ export default async function DashboardPage({
       supabase
         .from("requests")
         .select(
-          "id, request_number, title, category, status, priority, date_required, date_requested, updated_at, created_at"
+          "id, request_number, title, category, status, priority, date_required, date_requested, updated_at, created_at, owner_assigned_at"
         )
         .eq("owner_id", profile.id)
         .order("date_required", { ascending: true, nullsFirst: false }),
@@ -432,6 +454,28 @@ export default async function DashboardPage({
       count: cohort.filter((r) => r.priority === p).length,
     }));
 
+    // "New requests" is a fixed trailing 2-day window on owner_assigned_at
+    // (see migration 021), independent of the period filter above -- same
+    // reasoning as the technician dashboard's "new jobs".
+    const twoDaysAgo = subDays(new Date(), 2);
+    const newRequests = myReqs
+      .filter((r) => r.owner_assigned_at && parseISO(r.owner_assigned_at) >= twoDaysAgo)
+      .sort(
+        (a, b) =>
+          parseISO(b.owner_assigned_at as string).getTime() -
+          parseISO(a.owner_assigned_at as string).getTime()
+      );
+
+    const overdueRequests = cohort
+      .filter(
+        (r) =>
+          r.date_required &&
+          isPast(parseISO(r.date_required)) &&
+          !isToday(parseISO(r.date_required)) &&
+          !isTerminal(r.category, r.status)
+      )
+      .sort((a, b) => parseISO(a.date_required as string).getTime() - parseISO(b.date_required as string).getTime());
+
     const metrics = [
       {
         label: "Assigned in period",
@@ -499,38 +543,41 @@ export default async function DashboardPage({
           <MixCard title="Priority mix" segments={priorityMix} palette={PRIORITY_PALETTE} />
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-xl p-5">
-          <h2 className="text-sm font-semibold text-slate-900 mb-3">Today's Requests</h2>
-          {dueToday.length === 0 ? (
-            <p className="text-sm text-slate-400">Nothing due today.</p>
-          ) : (
-            <ul className="space-y-2">
-              {dueToday.map((r) => (
-                <li key={r.id}>
-                  <Link
-                    href={`/requests/${r.id}`}
-                    className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-slate-50 border border-transparent hover:border-slate-200 transition"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm text-slate-900 truncate">{r.title}</p>
-                      <p className="text-xs text-slate-500">
-                        {r.request_number} · {CATEGORY_LABELS[r.category as keyof typeof CATEGORY_LABELS]}
-                      </p>
-                    </div>
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${statusColor(
-                        r.category,
-                        r.status,
-                        stageList
-                      )}`}
-                    >
-                      {formatStatusLabel(r.category, r.status, stageList)}
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
+        <div className="space-y-4">
+          <RequestMiniTable
+            title="Today's requests"
+            rows={dueToday}
+            stageList={stageList}
+            emptyText="Nothing due today."
+            extraHeader="Due"
+            renderExtra={(r) => (r.date_required ? format(parseISO(r.date_required), "MMM d") : "—")}
+          />
+          <RequestMiniTable
+            title="New requests"
+            meta="(assigned to you in the last 2 days)"
+            rows={newRequests.slice(0, 5)}
+            stageList={stageList}
+            emptyText="No requests assigned to you in the last 2 days."
+            extraHeader="Assigned"
+            renderExtra={(r) => {
+              const assignedAt = (r as unknown as { owner_assigned_at: string | null }).owner_assigned_at;
+              return assignedAt ? format(parseISO(assignedAt), "MMM d, h:mm a") : "—";
+            }}
+          />
+          <RequestMiniTable
+            title="Overdue requests"
+            meta={overdueRequests.length > 0 ? `(${overdueRequests.length})` : undefined}
+            rows={overdueRequests.slice(0, 5)}
+            stageList={stageList}
+            emptyText="Nothing overdue."
+            extraHeader="Overdue by"
+            renderExtra={(r) =>
+              `${differenceInCalendarDays(new Date(), parseISO(r.date_required as string))} days`
+            }
+            moreCount={Math.max(0, overdueRequests.length - 5)}
+            moreHref="/requests?due=overdue"
+            moreLabel="View all overdue"
+          />
         </div>
       </div>
     );
@@ -542,7 +589,7 @@ export default async function DashboardPage({
   let query = supabase
     .from("requests")
     .select(
-      "id, request_number, title, category, status, priority, date_required, updated_at, owner_id, requestor_id"
+      "id, request_number, title, category, status, priority, date_required, updated_at, owner_id, requestor_id, created_at"
     );
 
   if (!isStaff) {
@@ -603,6 +650,21 @@ export default async function DashboardPage({
   const assignedToMe = isCoordinator
     ? all.filter((r) => r.owner_id === profile.id && !isTerminal(r.category, r.status)).slice(0, 6)
     : [];
+
+  // Same "today" / "new" / "overdue" table trio as the coordinator and
+  // technician dashboards, adapted for a role with no personal
+  // "assigned to me" timestamp to key off of -- "new" here means recently
+  // submitted rather than recently routed to a specific person.
+  const dueTodayGeneral = all.filter(
+    (r) => r.date_required && isToday(parseISO(r.date_required)) && !isTerminal(r.category, r.status)
+  );
+  const twoDaysAgoGeneral = subDays(new Date(), 2);
+  const newRequestsGeneral = all
+    .filter((r) => parseISO(r.created_at) >= twoDaysAgoGeneral)
+    .sort((a, b) => parseISO(b.created_at).getTime() - parseISO(a.created_at).getTime());
+  const overdueSorted = [...overdue].sort(
+    (a, b) => parseISO(a.date_required as string).getTime() - parseISO(b.date_required as string).getTime()
+  );
 
   const metrics = [
     { label: "Open Requests", value: open.length },
@@ -675,6 +737,40 @@ export default async function DashboardPage({
           )}
         </div>
       )}
+
+      <div className="space-y-4 mb-6">
+        <RequestMiniTable
+          title="Today's requests"
+          rows={dueTodayGeneral}
+          stageList={stageList}
+          emptyText="Nothing due today."
+          extraHeader="Due"
+          renderExtra={(r) => (r.date_required ? format(parseISO(r.date_required), "MMM d") : "—")}
+        />
+        <RequestMiniTable
+          title="New requests"
+          meta="(submitted in the last 2 days)"
+          rows={newRequestsGeneral.slice(0, 5)}
+          stageList={stageList}
+          emptyText="No requests submitted in the last 2 days."
+          extraHeader="Submitted"
+          renderExtra={(r) => format(parseISO((r as unknown as { created_at: string }).created_at), "MMM d, h:mm a")}
+        />
+        <RequestMiniTable
+          title="Overdue requests"
+          meta={overdue.length > 0 ? `(${overdue.length})` : undefined}
+          rows={overdueSorted.slice(0, 5)}
+          stageList={stageList}
+          emptyText="Nothing overdue."
+          extraHeader="Overdue by"
+          renderExtra={(r) =>
+            `${differenceInCalendarDays(new Date(), parseISO(r.date_required as string))} days`
+          }
+          moreCount={Math.max(0, overdue.length - 5)}
+          moreHref="/requests?due=overdue"
+          moreLabel="View all overdue"
+        />
+      </div>
 
       <div className="grid md:grid-cols-2 gap-6">
         <div className="bg-white border border-slate-200 rounded-xl p-5">
@@ -1021,6 +1117,120 @@ function MixCard({
           </span>
         ))}
       </div>
+    </div>
+  );
+}
+
+// Minimal shape shared by every "requests table" row across all three
+// dashboard branches (technician jobs, coordinator/manager requests) --
+// each of those has additional fields (assigned_at, owner_assigned_at,
+// created_at, etc.) accessed via a narrow cast inside renderExtra, since
+// the extra column's meaning differs per table (Due / Assigned / Overdue
+// by) and isn't worth generalizing into this shared shape.
+interface MiniRow {
+  id: string;
+  request_number: string;
+  title: string;
+  category: string;
+  priority: string;
+  status: string;
+  date_required: string | null;
+}
+
+function RequestMiniTable({
+  title,
+  meta,
+  rows,
+  stageList,
+  emptyText,
+  extraHeader,
+  renderExtra,
+  moreCount,
+  moreHref,
+  moreLabel,
+}: {
+  title: string;
+  meta?: string;
+  rows: MiniRow[];
+  stageList: WorkflowStage[];
+  emptyText: string;
+  extraHeader: string;
+  renderExtra: (r: MiniRow) => ReactNode;
+  moreCount?: number;
+  moreHref?: string;
+  moreLabel?: string;
+}) {
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-5">
+      <h2 className="text-sm font-semibold text-slate-900 mb-3">
+        {title}
+        {meta && <span className="font-normal text-slate-400"> {meta}</span>}
+      </h2>
+      {rows.length === 0 ? (
+        <p className="text-sm text-slate-400">{emptyText}</p>
+      ) : (
+        <>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-[11px] uppercase text-slate-400">
+                  <th className="font-normal pb-2 pr-2">Request</th>
+                  <th className="font-normal pb-2 px-2">Category</th>
+                  <th className="font-normal pb-2 px-2">Priority</th>
+                  <th className="font-normal pb-2 px-2">Status</th>
+                  <th className="font-normal pb-2 pl-2">{extraHeader}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.id} className="border-t border-slate-100">
+                    <td className="py-2 pr-2 max-w-[240px]">
+                      <Link
+                        href={`/requests/${r.id}`}
+                        className="text-slate-900 hover:underline truncate block"
+                      >
+                        {r.request_number} · {r.title}
+                      </Link>
+                    </td>
+                    <td className="py-2 px-2 text-slate-500 whitespace-nowrap">
+                      {CATEGORY_LABELS[r.category as keyof typeof CATEGORY_LABELS]}
+                    </td>
+                    <td className="py-2 px-2 whitespace-nowrap">
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded-full ${
+                          PRIORITY_COLORS[r.priority as keyof typeof PRIORITY_COLORS]
+                        }`}
+                      >
+                        {r.priority}
+                      </span>
+                    </td>
+                    <td className="py-2 px-2 whitespace-nowrap">
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded-full ${statusColor(
+                          r.category,
+                          r.status,
+                          stageList
+                        )}`}
+                      >
+                        {formatStatusLabel(r.category, r.status, stageList)}
+                      </span>
+                    </td>
+                    <td className="py-2 pl-2 text-slate-500 whitespace-nowrap">{renderExtra(r)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {!!moreCount && !!moreHref && (
+            <p className="text-xs text-slate-400 mt-3">
+              +{moreCount} more ·{" "}
+              <Link href={moreHref} className="text-[var(--accent)]">
+                {moreLabel ?? "View all"}
+              </Link>
+            </p>
+          )}
+        </>
+      )}
     </div>
   );
 }

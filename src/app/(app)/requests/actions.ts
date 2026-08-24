@@ -1015,6 +1015,7 @@ export async function approveAndAssignRequest(requestId: string, coordinatorId: 
     .update({
       status: "under_process",
       owner_id: coordinatorId,
+      owner_assigned_at: new Date().toISOString(),
     })
     .eq("id", requestId);
 
@@ -1387,7 +1388,7 @@ export async function reassignCoordinator(requestId: string, coordinatorId: stri
 
   const { error } = await supabase
     .from("requests")
-    .update({ owner_id: coordinatorId })
+    .update({ owner_id: coordinatorId, owner_assigned_at: new Date().toISOString() })
     .eq("id", requestId);
 
   if (error) {
@@ -1446,7 +1447,7 @@ export async function unassignCoordinator(requestId: string) {
 
   const { error } = await supabase
     .from("requests")
-    .update({ owner_id: null, status: "approved" })
+    .update({ owner_id: null, owner_assigned_at: null, status: "approved" })
     .eq("id", requestId);
 
   if (error) {
