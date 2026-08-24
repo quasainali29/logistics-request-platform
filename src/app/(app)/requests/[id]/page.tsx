@@ -41,6 +41,18 @@ import { CostBreakdownManager } from "./CostBreakdownManager";
 import { format, parseISO } from "date-fns";
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import {
+  Send,
+  ThumbsUp,
+  RotateCcw,
+  Users,
+  UserCheck,
+  Check,
+  Wrench,
+  CheckCheck,
+  Lock,
+  Circle,
+} from "lucide-react";
 
 function purchasingCategoryLabel(value: string | null) {
   if (!value) return "—";
@@ -143,7 +155,7 @@ export default async function RequestDetailPage({
       .from("status_history")
       .select("*, changed_by_profile:profiles(full_name)")
       .eq("request_id", id)
-      .order("changed_at", { ascending: false }),
+      .order("changed_at", { ascending: true }),
     getWorkflowStages(),
     supabase
       .from("workflow_transitions")
@@ -1043,20 +1055,13 @@ export default async function RequestDetailPage({
           </section>
 
           <section className="bg-white border border-slate-200 rounded-xl p-5">
-            <h2 className="text-sm font-semibold text-slate-900 mb-3">History</h2>
-            <ol className="space-y-3">
-              {(history ?? []).map((h) => (
-                <li key={h.id} className="text-sm">
-                  <p className="text-slate-900">
-                    {formatStatusLabel(request.category, h.status, stageList)}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    {h.changed_by_profile?.full_name ?? "System"} ·{" "}
-                    {format(parseISO(h.changed_at), "MMM d, h:mm a")}
-                  </p>
-                </li>
-              ))}
-            </ol>
+            <h2 className="text-sm font-semibold text-slate-900 mb-4">History</h2>
+            <RequestHistoryTimeline
+              category={request.category}
+              status={request.status}
+              history={(history ?? []) as StatusHistoryRow[]}
+              stageList={stageList}
+            />
           </section>
         </div>
       </div>
@@ -1114,5 +1119,142 @@ function PhotoGrid({
         ))}
       </div>
     </div>
+  );
+}
+
+// The forward-progress pipeline used to predict "what's next" in the
+// timeline below. Deliberately hardcoded rather than derived from
+// workflow_stages.sort_order or workflow_transitions -- neither is a
+// reliable source for this: sort_order is admin-editable and, in
+// production, doesn't actually match the real order stages are reached in
+// (e.g. "Team Assigned" is configured with a lower sort_order than
+// "Approved" despite always happening after it), and workflow_transitions
+// only models the back half of the flow (the generic transition buttons)
+// -- the approve/reject and assign-technician steps set status directly
+// from their own server actions and were never entered as transition
+// rows. This list is the real, verified order (checked live across
+// categories), and only ever needs updating if that core flow changes.
+const TIMELINE_ORDER = [
+  "submitted",
+  "approved",
+  "under_process",
+  "assigned",
+  "dispatched",
+  "on_site",
+  "completed",
+  "closed",
+];
+
+const TIMELINE_ICON: Record<string, typeof Send> = {
+  submitted: Send,
+  approved: ThumbsUp,
+  returned_for_info: RotateCcw,
+  under_process: Users,
+  assigned: UserCheck,
+  dispatched: Check,
+  on_site: Wrench,
+  completed: CheckCheck,
+  closed: Lock,
+};
+
+type StatusHistoryRow = {
+  id: string;
+  status: string;
+  changed_at: string;
+  changed_by_profile: { full_name: string } | null;
+};
+
+function RequestHistoryTimeline({
+  category,
+  status,
+  history,
+  stageList,
+}: {
+  category: string;
+  status: string;
+  history: StatusHistoryRow[];
+  stageList: WorkflowStage[];
+}) {
+  // "Pending" steps are only predicted for statuses on the known forward
+  // pipeline -- a request sitting in an off-pipeline status (e.g.
+  // "Returned for Info") has no predictable next step, so none are shown.
+  const currentIndex = TIMELINE_ORDER.indexOf(status);
+  const pendingKeys =
+    currentIndex === -1
+      ? []
+      : TIMELINE_ORDER.slice(currentIndex + 1).filter((key) =>
+          stageList.some((s) => s.category === category && s.key === key)
+        );
+
+  const items = [
+    ...history.map((h, i) => ({
+      key: h.status,
+      done: true,
+      current: i === history.length - 1,
+      label: formatStatusLabel(category, h.status, stageList),
+      actor: h.changed_by_profile?.full_name ?? "System",
+      time: format(parseISO(h.changed_at), "MMM d, h:mm a"),
+    })),
+    ...pendingKeys.map((key) => ({
+      key,
+      done: false,
+      current: false,
+      label: formatStatusLabel(category, key, stageList),
+      actor: null as string | null,
+      time: null as string | null,
+    })),
+  ];
+
+  if (items.length === 0) return <p className="text-sm text-slate-400">No history yet.</p>;
+
+  return (
+    <ol>
+      {items.map((item, i) => {
+        const Icon = TIMELINE_ICON[item.key] ?? Circle;
+        const isLast = i === items.length - 1;
+        const nextIsPending = !isLast && !items[i + 1].done;
+        const tone = item.done ? statusColor(category, item.key, stageList) : "bg-white text-slate-300";
+        return (
+          <li key={`${item.key}-${i}`} className="flex gap-3">
+            <div className="flex flex-col items-center flex-shrink-0">
+              <div
+                className={`w-7 h-7 rounded-full flex items-center justify-center ${tone} ${
+                  item.done ? "" : "border border-dashed border-slate-300"
+                } ${item.current ? "ring-2 ring-[var(--accent)] ring-offset-1" : ""}`}
+              >
+                <Icon size={14} strokeWidth={2} />
+              </div>
+              {!isLast && (
+                <div
+                  className={`w-0 flex-1 my-0.5 border-l ${
+                    item.done && !nextIsPending ? "border-slate-200" : "border-dashed border-slate-300"
+                  }`}
+                />
+              )}
+            </div>
+            <div className={isLast ? "flex-1 min-w-0" : "flex-1 min-w-0 pb-4"}>
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="flex items-baseline gap-1.5 min-w-0">
+                  <span
+                    className={`text-sm truncate ${
+                      item.done ? "font-medium text-slate-900" : "text-slate-400"
+                    }`}
+                  >
+                    {item.label}
+                  </span>
+                  {item.current && (
+                    <span className="text-[10px] font-normal text-[var(--accent)] flex-shrink-0">Current</span>
+                  )}
+                </span>
+                {item.time && (
+                  <span className="text-xs text-slate-400 flex-shrink-0">{item.time}</span>
+                )}
+              </div>
+              {item.actor && <p className="text-xs text-slate-500 mt-0.5">{item.actor}</p>}
+            </div>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
