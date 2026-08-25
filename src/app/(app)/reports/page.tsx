@@ -30,10 +30,10 @@ const REPORT_CARDS = [
     description: "Contracts overdue or due soon for maintenance, and compliance certificate status.",
   },
   {
-    href: "/reports/coordinator",
+    href: "/reports/performance",
     permKey: "view_report_coordinator",
-    title: "Coordinator Workload",
-    description: "Open and completed requests per owner, with average turnaround.",
+    title: "Logistics Performance",
+    description: "Overall completion/SLA/performance KPIs, with drill-down by coordinator or technician.",
   },
   {
     href: "/reports/cost",
