@@ -1,7 +1,7 @@
 import { unstable_cache } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { WorkflowStage } from "@/lib/types";
-import type { AmcLocation, AmcType } from "@/lib/types";
+import type { AmcLocation, AmcType, AmcReminderRecipient, AmcReminderRule } from "@/lib/types";
 import type { Project, Department } from "@/lib/types";
 
 // These are near-static reference/lookup tables that get re-fetched on
@@ -49,6 +49,30 @@ export const getAmcTypes = unstable_cache(
   },
   ["amc-types"],
   { tags: ["amc-types"], revalidate: 300 }
+);
+
+export const getAmcReminderRecipients = unstable_cache(
+  async (): Promise<AmcReminderRecipient[]> => {
+    const supabase = createAdminClient();
+    const { data } = await supabase.from("amc_reminder_recipients").select("*").order("email");
+    return (data ?? []) as AmcReminderRecipient[];
+  },
+  ["amc-reminder-recipients"],
+  { tags: ["amc-reminder-recipients"], revalidate: 300 }
+);
+
+export const getAmcReminderRules = unstable_cache(
+  async (): Promise<AmcReminderRule[]> => {
+    const supabase = createAdminClient();
+    const { data } = await supabase
+      .from("amc_reminder_rules")
+      .select("*")
+      .order("reminder_type")
+      .order("days_before", { ascending: false });
+    return (data ?? []) as AmcReminderRule[];
+  },
+  ["amc-reminder-rules"],
+  { tags: ["amc-reminder-rules"], revalidate: 300 }
 );
 
 // Active (not soft-deleted) projects, for the request-form dropdown. Not

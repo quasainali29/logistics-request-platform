@@ -101,6 +101,57 @@ export async function deleteAmcType(typeId: string) {
   updateTag("amc-types");
 }
 
+// Reminder recipients/rules are a global distribution list + settings,
+// not tied to any one user's account (the addresses aren't necessarily
+// platform logins), so managing them is manager-only -- same tier as
+// deleting a location/type above, since this list controls who receives
+// contract data by email.
+export async function addReminderRecipient(formData: FormData) {
+  const profile = await requireManager();
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  if (!email) throw new Error("Email address is required.");
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("amc_reminder_recipients")
+    .insert({ email, created_by: profile.id });
+  if (error && !error.message.includes("duplicate")) {
+    throw new Error(`Failed to add recipient: ${error.message}`);
+  }
+  revalidatePath("/amc");
+  updateTag("amc-reminder-recipients");
+}
+
+export async function deleteReminderRecipient(recipientId: string) {
+  await requireManager();
+  const supabase = await createClient();
+
+  const { error } = await supabase
+    .from("amc_reminder_recipients")
+    .delete()
+    .eq("id", recipientId);
+  if (error) {
+    throw new Error(`Failed to remove recipient: ${error.message}`);
+  }
+  revalidatePath("/amc");
+  updateTag("amc-reminder-recipients");
+}
+
+export async function toggleReminderRule(ruleId: string, enabled: boolean) {
+  await requireManager();
+  const supabase = await createClient();
+
+  const { error } = await supabase
+    .from("amc_reminder_rules")
+    .update({ enabled })
+    .eq("id", ruleId);
+  if (error) {
+    throw new Error(`Failed to update reminder rule: ${error.message}`);
+  }
+  revalidatePath("/amc");
+  updateTag("amc-reminder-rules");
+}
+
 export async function createAmcContract(formData: FormData) {
   const profile = await requireStaff();
   const supabase = await createClient();

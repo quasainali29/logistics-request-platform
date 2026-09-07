@@ -384,6 +384,21 @@ export interface AmcType {
   created_at: string;
 }
 
+export interface AmcReminderRecipient {
+  id: string;
+  email: string;
+  created_at: string;
+}
+
+export type AmcReminderType = "due_soon" | "expiry" | "overdue";
+
+export interface AmcReminderRule {
+  id: string;
+  reminder_type: AmcReminderType;
+  days_before: number;
+  enabled: boolean;
+}
+
 export interface AmcMaintenanceRecord {
   id: string;
   contract_id: string;

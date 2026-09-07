@@ -5,9 +5,18 @@ import {
   amcContractStatus,
   amcDueStatus,
   type AmcContract,
+  type AmcReminderType,
 } from "@/lib/types";
-import { addAmcLocation, addAmcType, deleteAmcLocation, deleteAmcType } from "./actions";
-import { getAmcLocations, getAmcTypes } from "@/lib/cachedLookups";
+import {
+  addAmcLocation,
+  addAmcType,
+  deleteAmcLocation,
+  deleteAmcType,
+  addReminderRecipient,
+  deleteReminderRecipient,
+  toggleReminderRule,
+} from "./actions";
+import { getAmcLocations, getAmcTypes, getAmcReminderRecipients, getAmcReminderRules } from "@/lib/cachedLookups";
 import { X } from "lucide-react";
 import AmcTable from "./AmcTable";
 
@@ -17,9 +26,11 @@ export default async function AmcPage() {
   const isManager = !!profile.is_manager;
   const supabase = await createClient();
 
-  const [locationList, typeList, { data: contracts }] = await Promise.all([
+  const [locationList, typeList, reminderRecipients, reminderRules, { data: contracts }] = await Promise.all([
     getAmcLocations(),
     getAmcTypes(),
+    getAmcReminderRecipients(),
+    getAmcReminderRules(),
     supabase
       .from("amc_contracts")
       .select(
@@ -178,6 +189,84 @@ export default async function AmcPage() {
         </div>
       </div>
 
+      {isManager && (
+        <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6">
+          <p className="text-sm font-semibold text-slate-900 mb-1">Email reminders</p>
+          <p className="text-xs text-slate-500 mb-4">
+            Sent daily (with the existing digest) to the recipients below, for any contract
+            matching an enabled rule.
+          </p>
+
+          <p className="text-xs font-semibold text-slate-500 uppercase mb-2">Recipients</p>
+          <div className="flex flex-wrap gap-2 items-center mb-5">
+            {reminderRecipients.map((r) => (
+              <span
+                key={r.id}
+                className="relative group bg-slate-100 text-slate-700 rounded-md px-3 py-1.5 text-xs"
+              >
+                {r.email}
+                <form
+                  action={deleteReminderRecipient.bind(null, r.id)}
+                  className="absolute -top-1.5 -right-1.5 opacity-0 group-hover:opacity-100 transition"
+                >
+                  <button
+                    type="submit"
+                    aria-label={`Remove ${r.email}`}
+                    className="w-4 h-4 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center"
+                  >
+                    <X size={10} strokeWidth={2.5} />
+                  </button>
+                </form>
+              </span>
+            ))}
+            <details className="relative">
+              <summary className="list-none cursor-pointer bg-white border border-dashed border-slate-300 text-slate-500 rounded-md px-3 py-1.5 text-xs hover:border-slate-400">
+                + Add email
+              </summary>
+              <form
+                action={addReminderRecipient}
+                className="absolute z-10 mt-2 bg-white border border-slate-200 rounded-lg shadow-lg p-3 flex gap-2 w-72"
+              >
+                <input
+                  name="email"
+                  type="email"
+                  required
+                  placeholder="name@company.com"
+                  className="flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-xs"
+                />
+                <button
+                  type="submit"
+                  className="bg-[var(--accent)] text-white rounded-md px-2.5 py-1.5 text-xs font-medium"
+                >
+                  Add
+                </button>
+              </form>
+            </details>
+          </div>
+
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <ReminderRuleCard
+              title="Maintenance due soon"
+              description="Before next maintenance date"
+              type="due_soon"
+              rules={reminderRules}
+            />
+            <ReminderRuleCard
+              title="Contract nearing expiry"
+              description="Before contract end date"
+              type="expiry"
+              rules={reminderRules}
+            />
+            <ReminderRuleCard
+              title="Overdue maintenance"
+              description="Once, the day it goes overdue"
+              type="overdue"
+              rules={reminderRules}
+            />
+          </div>
+        </div>
+      )}
+
       <AmcTable
         contracts={contractList}
         locations={locationList}
@@ -185,6 +274,54 @@ export default async function AmcPage() {
       />
 
       <p className="text-xs text-slate-400 mt-3">{supplierCount} active supplier{supplierCount === 1 ? "" : "s"}</p>
+    </div>
+  );
+}
+
+function ReminderRuleCard({
+  title,
+  description,
+  type,
+  rules,
+}: {
+  title: string;
+  description: string;
+  type: AmcReminderType;
+  rules: { id: string; reminder_type: AmcReminderType; days_before: number; enabled: boolean }[];
+}) {
+  const typeRules = rules.filter((r) => r.reminder_type === type);
+  const anyEnabled = typeRules.some((r) => r.enabled);
+
+  return (
+    <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs font-medium text-slate-900">{title}</p>
+        <span
+          className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+            anyEnabled ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"
+          }`}
+        >
+          {anyEnabled ? "On" : "Off"}
+        </span>
+      </div>
+      <p className="text-[11px] text-slate-500 mb-2.5">{description}</p>
+      <div className="flex flex-wrap gap-1.5">
+        {typeRules.map((rule) => (
+          <form key={rule.id} action={toggleReminderRule.bind(null, rule.id, !rule.enabled)}>
+            <button
+              type="submit"
+              className={`text-[11px] px-2.5 py-1 rounded-full border transition ${
+                rule.enabled
+                  ? "bg-[var(--bg-accent,#eef2ff)] border-[var(--accent)] text-[var(--accent)] font-medium"
+                  : "border-slate-300 text-slate-500 hover:bg-white"
+              }`}
+            >
+              {rule.enabled ? "✓ " : ""}
+              {type === "overdue" ? "Enabled" : `${rule.days_before} day${rule.days_before === 1 ? "" : "s"} before`}
+            </button>
+          </form>
+        ))}
+      </div>
     </div>
   );
 }
