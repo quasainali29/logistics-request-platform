@@ -113,7 +113,7 @@ export default function AmcTable({
                   <td className="px-4 py-3 text-slate-700">{c.type?.name ?? "—"}</td>
                   <td className="px-4 py-3 text-slate-700">{c.supplier_name}</td>
                   <td className="px-4 py-3 text-slate-700">
-                    {frequencyLabel(c.frequency_months)}
+                    {frequencyLabel(c.frequency_unit, c.frequency_value)}
                   </td>
                   <td className="px-4 py-3">
                     <span

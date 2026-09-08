@@ -6,6 +6,8 @@ import {
   amcContractStatus,
   amcDueStatus,
   frequencyLabel,
+  FREQUENCY_PRESETS,
+  frequencyOptionValue,
   AMC_DUE_STATUS_COLORS,
   AMC_DUE_STATUS_LABELS,
   AMC_CONTRACT_STATUS_COLORS,
@@ -90,7 +92,7 @@ export default async function AmcDetailPage({
 
         <Section title="Schedule and SLA">
           <Grid>
-            <Item label="Frequency" value={frequencyLabel(c.frequency_months)} />
+            <Item label="Frequency" value={frequencyLabel(c.frequency_unit, c.frequency_value)} />
             <Item label="Last maintenance" value={c.last_maintenance_date ? format(parseISO(c.last_maintenance_date), "MMM d, yyyy") : "Not logged yet"} />
             <Item label="Next maintenance" value={format(parseISO(c.next_maintenance_date), "MMM d, yyyy")} />
             <Item label="SLA response time" value={c.sla_response_hours ? `${c.sla_response_hours} hrs` : "—"} />
@@ -172,12 +174,16 @@ export default async function AmcDetailPage({
             </div>
             <div className="grid grid-cols-3 gap-4">
               <EditField label="Frequency">
-                <select name="frequency_months" defaultValue={String(c.frequency_months)} className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
-                  <option value="1">Monthly</option>
-                  <option value="2">Every 2 months</option>
-                  <option value="3">Quarterly</option>
-                  <option value="6">Bi-annual</option>
-                  <option value="12">Annual</option>
+                <select
+                  name="frequency"
+                  defaultValue={frequencyOptionValue(c.frequency_unit, c.frequency_value)}
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                >
+                  {FREQUENCY_PRESETS.map((p) => (
+                    <option key={frequencyOptionValue(p.unit, p.value)} value={frequencyOptionValue(p.unit, p.value)}>
+                      {p.label}
+                    </option>
+                  ))}
                 </select>
               </EditField>
               <EditField label="Next maintenance date">

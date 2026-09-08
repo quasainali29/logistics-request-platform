@@ -421,7 +421,8 @@ export interface AmcContract {
   supplier_contact_name: string | null;
   supplier_phone: string | null;
   supplier_email: string | null;
-  frequency_months: number;
+  frequency_unit: AmcFrequencyUnit;
+  frequency_value: number;
   sla_response_hours: number | null;
   payment_terms: string | null;
   contract_value: number | null;
@@ -443,12 +444,44 @@ export interface AmcContract {
 export type AmcDueStatus = "overdue" | "due_soon" | "upcoming";
 export type AmcContractStatus = "active" | "under_renewal" | "expired";
 
-export const FREQUENCY_LABELS: Record<number, string> = {
-  1: "Monthly", 2: "Every 2 months", 3: "Quarterly", 6: "Bi-annual", 12: "Annual",
-};
+export type AmcFrequencyUnit = "days" | "months";
 
-export function frequencyLabel(months: number): string {
-  return FREQUENCY_LABELS[months] ?? `Every ${months} months`;
+// Every selectable option in the AMC contract Frequency dropdown (see
+// src/app/(app)/amc/new/page.tsx and [id]/page.tsx), in display order.
+// 'months' cadences use calendar-accurate interval math in the DB trigger
+// (amc_apply_maintenance_record, migration 024) exactly like the original
+// frequency_months field did; 'days' is new and covers sub-monthly
+// cadences that a whole-months field can't express. "Twice a month" is
+// approximated as a rolling 15-day interval rather than calendar-anchored
+// dates (e.g. always the 1st/15th) -- consistent with how every other
+// frequency here rolls forward from the last logged visit.
+export const FREQUENCY_PRESETS: { unit: AmcFrequencyUnit; value: number; label: string }[] = [
+  { unit: "days", value: 7, label: "Weekly" },
+  { unit: "days", value: 15, label: "Twice a month" },
+  { unit: "months", value: 1, label: "Monthly" },
+  { unit: "months", value: 2, label: "Every 2 months" },
+  { unit: "months", value: 3, label: "Quarterly" },
+  { unit: "months", value: 6, label: "Bi-annual" },
+  { unit: "months", value: 12, label: "Annual" },
+];
+
+export function frequencyOptionValue(unit: AmcFrequencyUnit, value: number): string {
+  return `${unit}:${value}`;
+}
+
+export function parseFrequencyOptionValue(raw: string): { frequency_unit: AmcFrequencyUnit; frequency_value: number } {
+  const [unit, valueStr] = raw.split(":");
+  const value = Number(valueStr);
+  return {
+    frequency_unit: unit === "days" ? "days" : "months",
+    frequency_value: Number.isFinite(value) && value > 0 ? value : 1,
+  };
+}
+
+export function frequencyLabel(unit: AmcFrequencyUnit, value: number): string {
+  const preset = FREQUENCY_PRESETS.find((p) => p.unit === unit && p.value === value);
+  if (preset) return preset.label;
+  return unit === "days" ? `Every ${value} days` : `Every ${value} months`;
 }
 
 export function amcDueStatus(nextMaintenanceDate: string, today: Date = new Date()): AmcDueStatus {

@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath, updateTag } from "next/cache";
 import { getProfile } from "@/lib/auth";
 import type { AttachmentFile } from "@/lib/types";
+import { parseFrequencyOptionValue } from "@/lib/types";
 
 async function requireStaff() {
   const profile = await getProfile();
@@ -168,7 +169,7 @@ export async function createAmcContract(formData: FormData) {
       supplier_contact_name: String(formData.get("supplier_contact_name") ?? "") || null,
       supplier_phone: String(formData.get("supplier_phone") ?? "") || null,
       supplier_email: String(formData.get("supplier_email") ?? "") || null,
-      frequency_months: Number(formData.get("frequency_months") ?? 3),
+      ...parseFrequencyOptionValue(String(formData.get("frequency") ?? "months:3")),
       sla_response_hours: formData.get("sla_response_hours")
         ? Number(formData.get("sla_response_hours"))
         : null,
@@ -206,7 +207,7 @@ export async function updateAmcContract(contractId: string, formData: FormData) 
       supplier_contact_name: String(formData.get("supplier_contact_name") ?? "") || null,
       supplier_phone: String(formData.get("supplier_phone") ?? "") || null,
       supplier_email: String(formData.get("supplier_email") ?? "") || null,
-      frequency_months: Number(formData.get("frequency_months") ?? 3),
+      ...parseFrequencyOptionValue(String(formData.get("frequency") ?? "months:3")),
       sla_response_hours: formData.get("sla_response_hours")
         ? Number(formData.get("sla_response_hours"))
         : null,

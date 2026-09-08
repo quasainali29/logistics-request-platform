@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { createAmcContract } from "../actions";
 import { getAmcLocations, getAmcTypes } from "@/lib/cachedLookups";
+import { FREQUENCY_PRESETS, frequencyOptionValue } from "@/lib/types";
 
 export default async function NewAmcPage() {
   const profile = await getProfile();
@@ -102,15 +103,15 @@ export default async function NewAmcPage() {
         <div className="grid grid-cols-3 gap-4">
           <Field label="Frequency">
             <select
-              name="frequency_months"
-              defaultValue="3"
+              name="frequency"
+              defaultValue={frequencyOptionValue("months", 3)}
               className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
             >
-              <option value="1">Monthly</option>
-              <option value="2">Every 2 months</option>
-              <option value="3">Quarterly</option>
-              <option value="6">Bi-annual</option>
-              <option value="12">Annual</option>
+              {FREQUENCY_PRESETS.map((p) => (
+                <option key={frequencyOptionValue(p.unit, p.value)} value={frequencyOptionValue(p.unit, p.value)}>
+                  {p.label}
+                </option>
+              ))}
             </select>
           </Field>
           <Field label="Next maintenance date">
