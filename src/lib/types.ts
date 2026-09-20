@@ -25,7 +25,7 @@ export interface RoleRequestRow {
   user?: Profile;
 }
 
-export type Category = "delivery" | "labor" | "maintenance" | "procurement";
+export type Category = "delivery" | "labor" | "maintenance" | "procurement" | "installation";
 
 // Statuses are now admin-managed per category (see the `workflow_stages`
 // table) rather than a fixed union.
@@ -239,6 +239,35 @@ export interface LaborLine {
   nature_of_work: string | null;
 }
 
+export interface InstallationDetails {
+  id: string;
+  request_id: string;
+  site_location: string | null;
+  scheduled_date: string | null;
+  scheduled_time: string | null;
+  files: AttachmentFile[];
+}
+
+export interface InstallationItem {
+  id: string;
+  request_id: string;
+  item_no: number;
+  item_name: string;
+  required_quantity: number;
+  image_url: string | null;
+  current_location: string | null;
+}
+
+export interface InstallationCrewLine {
+  id: string;
+  request_id: string;
+  personnel_type: string | null;
+  quantity: number;
+  date_from: string | null;
+  date_to: string | null;
+  nature_of_work: string | null;
+}
+
 export interface RequestCloseout {
   id: string;
   request_id: string;
@@ -369,6 +398,7 @@ export const CATEGORY_LABELS: Record<Category, string> = {
   labor: "Labor",
   maintenance: "Maintenance",
   procurement: "Procurement",
+  installation: "Installation / Buildup",
 };
 
 export interface AmcLocation {

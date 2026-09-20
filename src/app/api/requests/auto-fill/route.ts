@@ -17,7 +17,7 @@ import {
 // fill (or that fails validation against the real Project/Department/enum
 // lists) is simply left null rather than guessed.
 
-const CATEGORIES = ["delivery", "labor", "maintenance", "procurement"] as const;
+const CATEGORIES = ["delivery", "labor", "maintenance", "procurement", "installation"] as const;
 const PRIORITIES = ["low", "medium", "high", "urgent"] as const;
 type Priority = (typeof PRIORITIES)[number];
 type Category = (typeof CATEGORIES)[number];
@@ -99,7 +99,7 @@ Valid departments: ${departmentNames.join(", ") || "(none configured)"}
 Rules:
 - Only set project_id to one of the exact IDs listed above, and only if that project is clearly referenced (by name or an obvious close variant) in the text. Otherwise omit it.
 - Only set department to one of the exact names listed above, and only if clearly implied. Otherwise omit it.
-- Pick the single best-matching category (delivery, labor, maintenance, or procurement). Only include the matching category's detail object (delivery / maintenance / procurement / labor); omit the other three entirely.
+- Pick the single best-matching category (delivery, labor, maintenance, procurement, or installation -- installation/buildup is for jobs that need both equipment on site AND a crew to put it up, e.g. exhibition stands, event setups). Only include the matching category's detail object (delivery / maintenance / procurement / labor / installation); omit the others entirely.
 - title: a short, specific summary (well under 12 words), not the full description.
 - description: a clear 1-3 sentence restatement of the request, close to the user's own words.
 - For item lists (delivery items, procurement line items, labor personnel lines), include every distinct item/role mentioned with whatever detail is stated. If none are mentioned, return an empty array.
@@ -190,6 +190,38 @@ Rules:
             },
           },
         },
+        installation: {
+          type: "object",
+          properties: {
+            site_location: { type: "string" },
+            installation_date: { type: "string", description: "YYYY-MM-DD" },
+            installation_time: { type: "string", description: "HH:MM 24h" },
+            items: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  item_name: { type: "string" },
+                  required_quantity: { type: "number" },
+                  current_location: { type: "string" },
+                },
+                required: ["item_name"],
+              },
+            },
+            crew: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  personnel_type: { type: "string", enum: laborTypes },
+                  nature_of_work: { type: "string", enum: natureOfWork },
+                  quantity: { type: "number" },
+                },
+                required: ["personnel_type"],
+              },
+            },
+          },
+        },
       },
       required: ["category", "title", "description"],
     },
@@ -224,6 +256,7 @@ Rules:
   const maintenanceRaw = obj(toolInput.maintenance);
   const procurementRaw = obj(toolInput.procurement);
   const laborRaw = obj(toolInput.labor);
+  const installationRaw = obj(toolInput.installation);
 
   const result = {
     category,
@@ -290,6 +323,30 @@ Rules:
             labor_date_from: isoDate(laborRaw.labor_date_from),
             labor_date_to: isoDate(laborRaw.labor_date_to),
             lines: arr(laborRaw.lines)
+              .map((l) => obj(l))
+              .filter((l): l is Record<string, unknown> => !!l && !!pick(l.personnel_type, laborTypes))
+              .map((l) => ({
+                personnel_type: pick(l.personnel_type, laborTypes) as string,
+                nature_of_work: pick(l.nature_of_work, natureOfWork),
+                quantity: num(l.quantity),
+              })),
+          }
+        : null,
+    installation:
+      category === "installation" && installationRaw
+        ? {
+            site_location: str(installationRaw.site_location),
+            installation_date: isoDate(installationRaw.installation_date),
+            installation_time: isoTime(installationRaw.installation_time),
+            items: arr(installationRaw.items)
+              .map((it) => obj(it))
+              .filter((it): it is Record<string, unknown> => !!it && !!str(it.item_name))
+              .map((it) => ({
+                item_name: str(it.item_name) as string,
+                required_quantity: num(it.required_quantity),
+                current_location: str(it.current_location),
+              })),
+            crew: arr(installationRaw.crew)
               .map((l) => obj(l))
               .filter((l): l is Record<string, unknown> => !!l && !!pick(l.personnel_type, laborTypes))
               .map((l) => ({

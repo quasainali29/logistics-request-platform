@@ -32,7 +32,7 @@ interface AutoFillItem {
 }
 
 interface AutoFillResult {
-  category: "delivery" | "labor" | "maintenance" | "procurement" | null;
+  category: "delivery" | "labor" | "maintenance" | "procurement" | "installation" | null;
   title: string | null;
   priority: "low" | "medium" | "high" | "urgent" | null;
   project_id: string | null;
@@ -65,6 +65,13 @@ interface AutoFillResult {
     labor_date_from: string | null;
     labor_date_to: string | null;
     lines: { personnel_type: string; nature_of_work?: string | null; quantity?: number | null }[];
+  } | null;
+  installation: {
+    site_location: string | null;
+    installation_date: string | null;
+    installation_time: string | null;
+    items: AutoFillItem[];
+    crew: { personnel_type: string; nature_of_work?: string | null; quantity?: number | null }[];
   } | null;
 }
 
@@ -101,6 +108,21 @@ interface ProcItemRow {
 }
 
 interface LaborRow {
+  key: number;
+  personnel_type?: string;
+  quantity?: number;
+  nature_of_work?: string | null;
+}
+
+interface InstallItemRow {
+  key: number;
+  item_name?: string;
+  required_quantity?: number;
+  image_url?: string | null;
+  current_location?: string | null;
+}
+
+interface InstallCrewRow {
   key: number;
   personnel_type?: string;
   quantity?: number;
@@ -149,6 +171,16 @@ export interface RequestFormInitialData {
   labor_date_from?: string | null;
   labor_date_to?: string | null;
   labor_lines?: { personnel_type: string; quantity: number; nature_of_work?: string | null }[];
+  site_location?: string | null;
+  installation_date?: string | null;
+  installation_time?: string | null;
+  installation_items?: {
+    item_name: string;
+    required_quantity: number;
+    image_url: string | null;
+    current_location: string | null;
+  }[];
+  installation_crew?: { personnel_type: string; quantity: number; nature_of_work?: string | null }[];
 }
 
 interface RequestFormProps {
@@ -210,6 +242,16 @@ export default function RequestForm({
   const [deliveryItemRows, setDeliveryItemRows] = useState<DeliveryItemRow[]>(
     initial?.delivery_items?.length
       ? initial.delivery_items.map((d) => ({ key: nextKey(), ...d }))
+      : [{ key: nextKey() }]
+  );
+  const [installItemRows, setInstallItemRows] = useState<InstallItemRow[]>(
+    initial?.installation_items?.length
+      ? initial.installation_items.map((d) => ({ key: nextKey(), ...d }))
+      : [{ key: nextKey() }]
+  );
+  const [installCrewRows, setInstallCrewRows] = useState<InstallCrewRow[]>(
+    initial?.installation_crew?.length
+      ? initial.installation_crew.map((l) => ({ key: nextKey(), ...l }))
       : [{ key: nextKey() }]
   );
   const [purchasingCategory, setPurchasingCategory] = useState(initial?.purchasing_category ?? "");
@@ -311,6 +353,36 @@ export default function RequestForm({
         );
         newHighlights.push("labor_lines");
       }
+    } else if (data.category === "installation" && data.installation) {
+      const inst = data.installation;
+      setFieldValue("site_location", inst.site_location);
+      setFieldValue("installation_date", inst.installation_date);
+      setFieldValue("installation_time", inst.installation_time);
+      if (inst.site_location) newHighlights.push("site_location");
+      if (inst.installation_date) newHighlights.push("installation_date");
+      if (inst.installation_time) newHighlights.push("installation_time");
+      if (inst.items?.length) {
+        setInstallItemRows(
+          inst.items.map((it) => ({
+            key: nextKey(),
+            item_name: it.item_name ?? "",
+            required_quantity: it.required_quantity ?? undefined,
+            current_location: it.current_location ?? undefined,
+          }))
+        );
+        newHighlights.push("installation_items");
+      }
+      if (inst.crew?.length) {
+        setInstallCrewRows(
+          inst.crew.map((row) => ({
+            key: nextKey(),
+            personnel_type: row.personnel_type,
+            nature_of_work: row.nature_of_work ?? undefined,
+            quantity: row.quantity ?? undefined,
+          }))
+        );
+        newHighlights.push("installation_crew");
+      }
     }
     if (newHighlights.length) {
       setHighlighted((prev) => new Set([...prev, ...newHighlights]));
@@ -402,6 +474,13 @@ export default function RequestForm({
     else if (key.startsWith("proc_item_")) key = "proc_items";
     else if (key.startsWith("labor_type") || key.startsWith("labor_nature") || key.startsWith("labor_qty"))
       key = "labor_lines";
+    else if (key.startsWith("install_item_")) key = "installation_items";
+    else if (
+      key.startsWith("install_crew_type") ||
+      key.startsWith("install_crew_nature") ||
+      key.startsWith("install_crew_qty")
+    )
+      key = "installation_crew";
     setHighlighted((prev) => {
       if (!prev.has(key)) return prev;
       const next = new Set(prev);
@@ -491,6 +570,17 @@ export default function RequestForm({
         );
       }
 
+      if (category === "installation") {
+        const imageFiles = await compressImages(raw.getAll("install_item_image[]") as File[]);
+        const images = await Promise.all(
+          imageFiles.map((f) => uploadAttachment(f, "installation/pending/items"))
+        );
+        out.append(
+          "install_item_image_urls_json",
+          JSON.stringify(images.map((r) => r?.url ?? null))
+        );
+      }
+
       if (isManagerEdit && requestId) {
         await managerEditRequest(requestId, out);
       } else if (isEdit && requestId) {
@@ -571,6 +661,7 @@ export default function RequestForm({
               <option value="labor">Labor</option>
               <option value="maintenance">Maintenance</option>
               <option value="procurement">Procurement</option>
+              <option value="installation">Installation / Buildup</option>
             </select>
             {isEdit && (
               <p className="text-xs text-slate-500 mt-1">Category can&rsquo;t be changed.</p>
@@ -1144,6 +1235,167 @@ export default function RequestForm({
               className="text-sm text-[var(--accent)] font-medium mt-2"
             >
               + Add line item
+            </button>
+          </div>
+        </section>
+      )}
+
+      {category === "installation" && (
+        <section className="bg-white border border-slate-200 rounded-xl p-6 space-y-4">
+          <h2 className="text-sm font-semibold text-slate-900">Installation / Buildup details</h2>
+          <Field label="Site location" required>
+            <input
+              name="site_location"
+              required
+              defaultValue={initial?.site_location ?? ""}
+              className={inputClass}
+            />
+          </Field>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Scheduled date">
+              <input
+                type="date"
+                name="installation_date"
+                defaultValue={initial?.installation_date ?? ""}
+                className={inputClass}
+              />
+            </Field>
+            <Field label="Scheduled time">
+              <input
+                type="time"
+                name="installation_time"
+                defaultValue={initial?.installation_time ?? ""}
+                className={inputClass}
+              />
+            </Field>
+          </div>
+
+          <div>
+            <p className="text-sm font-medium text-slate-700 mb-2">Items to install</p>
+            <div className="space-y-3">
+              {installItemRows.map((row, i) => (
+                <div
+                  key={row.key}
+                  className="border border-slate-200 rounded-lg p-3 grid sm:grid-cols-5 gap-2 items-start"
+                >
+                  <div className="sm:col-span-1">
+                    <label className="block text-xs text-slate-500 mb-1">Item no.</label>
+                    <div className="text-sm text-slate-500 px-1 py-2">{i + 1}</div>
+                  </div>
+                  <div className="sm:col-span-1">
+                    <label className="block text-xs text-slate-500 mb-1">Item name</label>
+                    <input
+                      name="install_item_name[]"
+                      defaultValue={row.item_name ?? ""}
+                      className={inputClass}
+                    />
+                  </div>
+                  <div className="sm:col-span-1">
+                    <label className="block text-xs text-slate-500 mb-1">Required qty</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      name="install_item_qty[]"
+                      defaultValue={row.required_quantity ?? ""}
+                      className={inputClass}
+                    />
+                  </div>
+                  <div className="sm:col-span-1">
+                    <label className="block text-xs text-slate-500 mb-1">Image</label>
+                    {row.image_url && (
+                      <p className="text-xs text-slate-500 mb-1 truncate">Has image — replace below</p>
+                    )}
+                    <input
+                      type="file"
+                      name="install_item_image[]"
+                      accept="image/*"
+                      className={fileInputClass}
+                    />
+                  </div>
+                  <div className="sm:col-span-1">
+                    <label className="block text-xs text-slate-500 mb-1">
+                      Current location
+                    </label>
+                    <input
+                      name="install_item_location[]"
+                      defaultValue={row.current_location ?? ""}
+                      className={inputClass}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => setInstallItemRows([...installItemRows, { key: nextKey() }])}
+              className="text-sm text-[var(--accent)] font-medium mt-2"
+            >
+              + Add item
+            </button>
+          </div>
+
+          <div>
+            <p className="text-sm font-medium text-slate-700 mb-2">Crew needed</p>
+            <div className="space-y-3">
+              {installCrewRows.map((row, i) => (
+                <div
+                  key={row.key}
+                  className="border border-slate-200 rounded-lg p-3 grid sm:grid-cols-4 gap-2 items-start"
+                >
+                  <div className="sm:col-span-1">
+                    <label className="block text-xs text-slate-500 mb-1">Item no.</label>
+                    <div className="text-sm text-slate-500 px-1 py-2">{i + 1}</div>
+                  </div>
+                  <div className="sm:col-span-1">
+                    <label className="block text-xs text-slate-500 mb-1">
+                      Type of requirement
+                    </label>
+                    <select
+                      name="install_crew_type[]"
+                      defaultValue={row.personnel_type ?? "labor"}
+                      className={inputClass}
+                    >
+                      {LABOR_TYPES.map((t) => (
+                        <option key={t.value} value={t.value}>
+                          {t.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="sm:col-span-1">
+                    <label className="block text-xs text-slate-500 mb-1">Nature of work</label>
+                    <select
+                      name="install_crew_nature[]"
+                      defaultValue={row.nature_of_work ?? "setup_installation"}
+                      className={inputClass}
+                    >
+                      {NATURE_OF_WORK_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="sm:col-span-1">
+                    <label className="block text-xs text-slate-500 mb-1">Qty</label>
+                    <input
+                      type="number"
+                      name="install_crew_qty[]"
+                      min={1}
+                      defaultValue={row.quantity ?? 1}
+                      className={inputClass}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => setInstallCrewRows([...installCrewRows, { key: nextKey() }])}
+              className="text-sm text-[var(--accent)] font-medium mt-2"
+            >
+              + Add crew role
             </button>
           </div>
         </section>

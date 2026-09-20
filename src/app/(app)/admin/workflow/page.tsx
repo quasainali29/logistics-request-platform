@@ -7,7 +7,7 @@ import { AdminNav } from "../AdminNav";
 import { createStage, updateStage, createTransition } from "./actions";
 import { DeleteStageButton, DeleteTransitionButton } from "./actions-client";
 
-const CATEGORIES: Category[] = ["delivery", "labor", "maintenance", "procurement"];
+const CATEGORIES: Category[] = ["delivery", "labor", "maintenance", "procurement", "installation"];
 
 const COLOR_OPTIONS = [
   { value: "bg-slate-100 text-slate-700", label: "Slate" },

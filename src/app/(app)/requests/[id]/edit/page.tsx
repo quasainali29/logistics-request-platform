@@ -169,6 +169,35 @@ export default async function EditRequestPage({
       quantity: l.quantity,
       nature_of_work: l.nature_of_work,
     }));
+  } else if (request.category === "installation") {
+    const [{ data: details }, { data: items }, { data: crew }] = await Promise.all([
+      supabase.from("installation_details").select("*").eq("request_id", id).maybeSingle(),
+      supabase
+        .from("installation_items")
+        .select("*")
+        .eq("request_id", id)
+        .order("item_no", { ascending: true }),
+      supabase.from("installation_crew_lines").select("*").eq("request_id", id),
+    ]);
+    if (details) {
+      initial = {
+        ...initial,
+        site_location: details.site_location,
+        installation_date: details.scheduled_date,
+        installation_time: details.scheduled_time,
+      };
+    }
+    initial.installation_items = (items ?? []).map((it) => ({
+      item_name: it.item_name,
+      required_quantity: it.required_quantity,
+      image_url: it.image_url,
+      current_location: it.current_location,
+    }));
+    initial.installation_crew = (crew ?? []).map((l) => ({
+      personnel_type: l.personnel_type,
+      quantity: l.quantity,
+      nature_of_work: l.nature_of_work,
+    }));
   }
 
   return (

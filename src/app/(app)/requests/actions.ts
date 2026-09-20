@@ -175,6 +175,13 @@ export async function createRequest(formData: FormData) {
     }
   }
 
+  if (category === "installation") {
+    const siteLocation = (formData.get("site_location") as string)?.trim();
+    if (!siteLocation) {
+      redirect(`/requests/new?error=${encodeURIComponent("Site location is required")}`);
+    }
+  }
+
   const { data: request, error } = await supabase
     .from("requests")
     .insert({
@@ -375,6 +382,80 @@ export async function createRequest(formData: FormData) {
     }
   }
 
+  if (category === "installation") {
+    await supabase.from("installation_details").insert({
+      request_id: request.id,
+      site_location: formData.get("site_location") as string,
+      scheduled_date: (formData.get("installation_date") as string) || null,
+      scheduled_time: (formData.get("installation_time") as string) || null,
+    });
+
+    const names = formData.getAll("install_item_name[]") as string[];
+    const qtys = formData.getAll("install_item_qty[]") as string[];
+    const locations = formData.getAll("install_item_location[]") as string[];
+    const imageUrls = parseUrlArray(formData, "install_item_image_urls_json");
+
+    const itemRows2 = [];
+    for (let i = 0; i < names.length; i++) {
+      const itemName = (names[i] || "").trim();
+      const location = (locations[i] || "").trim();
+      const qtyRaw = qtys[i];
+      if (!itemName && !location && !qtyRaw) continue;
+
+      itemRows2.push({
+        request_id: request.id,
+        item_no: i + 1,
+        item_name: itemName || `Item ${i + 1}`,
+        required_quantity: parseFloat(qtyRaw || "0") || 0,
+        image_url: imageUrls[i] ?? null,
+        current_location: location || null,
+      });
+    }
+
+    if (itemRows2.length > 0) {
+      await supabase.from("installation_items").insert(itemRows2);
+    }
+
+    const crewTypes = formData.getAll("install_crew_type[]") as string[];
+    const crewQtys = formData.getAll("install_crew_qty[]") as string[];
+    const crewNatures = formData.getAll("install_crew_nature[]") as string[];
+
+    const crewRows = crewTypes
+      .map((type, i) => ({
+        request_id: request.id,
+        personnel_type: type,
+        quantity: parseInt(crewQtys[i] || "1", 10),
+        date_from: (formData.get("installation_date") as string) || null,
+        date_to: (formData.get("installation_date") as string) || null,
+        nature_of_work: crewNatures[i] || null,
+      }))
+      .filter((r) => r.personnel_type);
+
+    if (crewRows.length > 0) {
+      await supabase.from("installation_crew_lines").insert(crewRows);
+    }
+
+    const siteLocationVal = (formData.get("site_location") as string) || "";
+    if (siteLocationVal) {
+      categoryDetails.push({ label: "Site location", value: escapeHtml(siteLocationVal) });
+    }
+    const installWhen = formatEmailDate(
+      (formData.get("installation_date") as string) || null,
+      (formData.get("installation_time") as string) || null
+    );
+    if (installWhen) categoryDetails.push({ label: "Scheduled for", value: installWhen });
+    if (itemRows2.length > 0) {
+      categoryDetails.push({
+        label: "Items",
+        value: `${itemRows2.length} item${itemRows2.length === 1 ? "" : "s"}`,
+      });
+    }
+    if (crewRows.length > 0) {
+      const summary = crewRows.map((r) => `${r.quantity}× ${r.personnel_type}`).join(", ");
+      categoryDetails.push({ label: "Crew", value: escapeHtml(summary) });
+    }
+  }
+
   // Best-effort notifications for the two audiences that care about a
   // brand-new submission: the logistics managers who need to review/approve
   // it, and the requestor who wants confirmation it went in. Never block
@@ -477,6 +558,15 @@ async function applyRequestEdits(
     if (!deliveryLocation) {
       redirect(
         `/requests/${requestId}/edit?error=${encodeURIComponent("Delivery location is required")}`
+      );
+    }
+  }
+
+  if (category === "installation") {
+    const siteLocation = (formData.get("site_location") as string)?.trim();
+    if (!siteLocation) {
+      redirect(
+        `/requests/${requestId}/edit?error=${encodeURIComponent("Site location is required")}`
       );
     }
   }
@@ -653,6 +743,64 @@ async function applyRequestEdits(
 
     if (itemRows.length > 0) {
       await supabase.from("procurement_line_items").insert(itemRows);
+    }
+  }
+
+  if (category === "installation") {
+    await supabase
+      .from("installation_details")
+      .update({
+        site_location: formData.get("site_location") as string,
+        scheduled_date: (formData.get("installation_date") as string) || null,
+        scheduled_time: (formData.get("installation_time") as string) || null,
+      })
+      .eq("request_id", requestId);
+
+    const names = formData.getAll("install_item_name[]") as string[];
+    const qtys = formData.getAll("install_item_qty[]") as string[];
+    const locations = formData.getAll("install_item_location[]") as string[];
+    const imageUrls = parseUrlArray(formData, "install_item_image_urls_json");
+
+    const itemRows2 = [];
+    for (let i = 0; i < names.length; i++) {
+      const itemName = (names[i] || "").trim();
+      const location = (locations[i] || "").trim();
+      const qtyRaw = qtys[i];
+      if (!itemName && !location && !qtyRaw) continue;
+
+      itemRows2.push({
+        request_id: requestId,
+        item_no: i + 1,
+        item_name: itemName || `Item ${i + 1}`,
+        required_quantity: parseFloat(qtyRaw || "0") || 0,
+        image_url: imageUrls[i] ?? null,
+        current_location: location || null,
+      });
+    }
+
+    await supabase.from("installation_items").delete().eq("request_id", requestId);
+    if (itemRows2.length > 0) {
+      await supabase.from("installation_items").insert(itemRows2);
+    }
+
+    const crewTypes = formData.getAll("install_crew_type[]") as string[];
+    const crewQtys = formData.getAll("install_crew_qty[]") as string[];
+    const crewNatures = formData.getAll("install_crew_nature[]") as string[];
+
+    const crewRows = crewTypes
+      .map((type, i) => ({
+        request_id: requestId,
+        personnel_type: type,
+        quantity: parseInt(crewQtys[i] || "1", 10),
+        date_from: (formData.get("installation_date") as string) || null,
+        date_to: (formData.get("installation_date") as string) || null,
+        nature_of_work: crewNatures[i] || null,
+      }))
+      .filter((r) => r.personnel_type);
+
+    await supabase.from("installation_crew_lines").delete().eq("request_id", requestId);
+    if (crewRows.length > 0) {
+      await supabase.from("installation_crew_lines").insert(crewRows);
     }
   }
 }
@@ -1784,7 +1932,7 @@ export async function closeRequestWithDocuments(requestId: string, formData: For
   // before this change keep whatever documents they already have.
   const closeoutRow: Record<string, unknown> = { request_id: requestId, closed_by: user.id };
 
-  if (category === "labor") {
+  if (category === "labor" || category === "installation") {
     // Personnel actually deployed, confirmed/adjusted by the coordinator --
     // kept separate from request_cost_lines below, which is the one place
     // dollar amounts are entered for every category (see parseCostLines).

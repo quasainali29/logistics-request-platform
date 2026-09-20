@@ -6,7 +6,7 @@
 // drift between the two pages. The dashboard imports these too instead of
 // keeping its own copies.
 
-export const CATEGORIES_ORDER = ["delivery", "labor", "maintenance", "procurement"] as const;
+export const CATEGORIES_ORDER = ["delivery", "labor", "maintenance", "procurement", "installation"] as const;
 export const PRIORITIES_ORDER = ["low", "medium", "high", "urgent"] as const;
 export const PRIORITY_LABELS: Record<string, string> = {
   low: "Low",
@@ -30,6 +30,7 @@ export const CATEGORY_PALETTE: Record<string, string> = {
   labor: "bg-teal-400",
   maintenance: "bg-amber-400",
   procurement: "bg-pink-400",
+  installation: "bg-violet-400",
 };
 
 export function DonutCard({

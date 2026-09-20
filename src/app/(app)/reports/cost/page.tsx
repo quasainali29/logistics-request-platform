@@ -7,7 +7,7 @@ import { ReportsNav } from "../ReportsNav";
 import { StatCard } from "../_components/StatCard";
 import { BarList } from "../_components/BarList";
 
-const CATEGORIES: Category[] = ["delivery", "labor", "maintenance", "procurement"];
+const CATEGORIES: Category[] = ["delivery", "labor", "maintenance", "procurement", "installation"];
 
 interface CostLineJoinRow {
   id: string;

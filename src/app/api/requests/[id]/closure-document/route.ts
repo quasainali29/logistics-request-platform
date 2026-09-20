@@ -317,6 +317,57 @@ export async function GET(
       closingNote:
         "This is to confirm that the above items have been procured and received, unless otherwise noted above.",
     };
+  } else if (request.category === "installation") {
+    const [{ data: installationDetails }, { data: items }, { data: crew }] = await Promise.all([
+      supabase.from("installation_details").select("*").eq("request_id", id).maybeSingle(),
+      supabase
+        .from("installation_items")
+        .select("*")
+        .eq("request_id", id)
+        .order("item_no", { ascending: true }),
+      supabase.from("installation_crew_lines").select("*").eq("request_id", id),
+    ]);
+    const scheduled = installationDetails?.scheduled_date
+      ? `${format(parseISO(installationDetails.scheduled_date), "MMM d, yyyy")}${
+          installationDetails.scheduled_time ? ` · ${installationDetails.scheduled_time}` : ""
+        }`
+      : "—";
+    const crewSummary = (crew ?? []).length
+      ? (crew ?? [])
+          .map((l) => `${l.quantity}× ${personnelTypeLabel(l.personnel_type)}`)
+          .join(", ")
+      : "—";
+    config = {
+      docTypeLabel: "Installation / buildup sheet",
+      docNumberLabel: "Request no.",
+      docNumber: request.request_number ?? "—",
+      generatedDate,
+      fields: [
+        { label: "Requested by", value: requestorName },
+        { label: "Site location", value: installationDetails?.site_location ?? "—" },
+        { label: "Department", value: request.department ?? "—" },
+        { label: "Scheduled", value: scheduled },
+        { label: "Project", value: projectDisplay },
+        { label: "Crew deployed", value: crewSummary },
+        { label: "Assigned to", value: assignedTo },
+        { label: "Approved by", value: approverName },
+      ],
+      table: {
+        headers: ["S/N", "Item", "Qty", "Location"],
+        colWidths: [0.1, 0.5, 0.15, 0.25],
+        rows: (items ?? []).map((it) => [
+          String(it.item_no),
+          it.item_name,
+          String(it.required_quantity),
+          it.current_location || "—",
+        ]),
+      },
+      costLines,
+      photos,
+      signOff,
+      closingNote:
+        "This is to confirm that the above installation / buildup work has been completed as described, unless otherwise noted above.",
+    };
   } else {
     return NextResponse.json({ error: "Unsupported request category." }, { status: 400 });
   }

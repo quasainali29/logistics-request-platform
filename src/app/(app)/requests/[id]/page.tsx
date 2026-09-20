@@ -19,6 +19,9 @@ import {
   type ProcurementDetails,
   type ProcurementItem,
   type LaborLine,
+  type InstallationDetails,
+  type InstallationItem,
+  type InstallationCrewLine,
   type RequestCloseout,
   type LaborCloseoutLine,
   type RequestCostLine,
@@ -210,7 +213,10 @@ export default async function RequestDetailPage({
   // original request's personnel lines the first time the coordinator
   // opens the closeout form.
   let laborSeedLines: { personnel_type: string; quantity: number }[] = [];
-  if (request.category === "labor" && request.status === "completed") {
+  if (
+    (request.category === "labor" || request.category === "installation") &&
+    request.status === "completed"
+  ) {
     if (laborCloseoutLines && laborCloseoutLines.length > 0) {
       laborSeedLines = (laborCloseoutLines as LaborCloseoutLine[]).map((l) => ({
         personnel_type: l.personnel_type,
@@ -218,7 +224,7 @@ export default async function RequestDetailPage({
       }));
     } else {
       const { data: originalLines } = await supabase
-        .from("labor_personnel_lines")
+        .from(request.category === "labor" ? "labor_personnel_lines" : "installation_crew_lines")
         .select("personnel_type, quantity")
         .eq("request_id", id);
       laborSeedLines = (originalLines ?? []).map((l) => ({
@@ -234,6 +240,9 @@ export default async function RequestDetailPage({
   let procurementDetails: ProcurementDetails | null = null;
   let procurementItems: ProcurementItem[] = [];
   let laborLines: LaborLine[] = [];
+  let installationDetails: InstallationDetails | null = null;
+  let installationItems: InstallationItem[] = [];
+  let installationCrew: InstallationCrewLine[] = [];
 
   if (request.category === "delivery") {
     const [{ data: dd }, { data: items }] = await Promise.all([
@@ -270,6 +279,19 @@ export default async function RequestDetailPage({
     ]);
     procurementDetails = pd as ProcurementDetails | null;
     procurementItems = (items ?? []) as ProcurementItem[];
+  } else if (request.category === "installation") {
+    const [{ data: idet }, { data: items }, { data: crew }] = await Promise.all([
+      supabase.from("installation_details").select("*").eq("request_id", id).maybeSingle(),
+      supabase
+        .from("installation_items")
+        .select("*")
+        .eq("request_id", id)
+        .order("item_no", { ascending: true }),
+      supabase.from("installation_crew_lines").select("*").eq("request_id", id),
+    ]);
+    installationDetails = idet as InstallationDetails | null;
+    installationItems = (items ?? []) as InstallationItem[];
+    installationCrew = (crew ?? []) as InstallationCrewLine[];
   }
 
   const stageList = (stages ?? []) as WorkflowStage[];
@@ -545,7 +567,11 @@ export default async function RequestDetailPage({
           <CloseoutForm
             requestId={id}
             category={request.category}
-            laborLines={request.category === "labor" ? laborSeedLines : undefined}
+            laborLines={
+              request.category === "labor" || request.category === "installation"
+                ? laborSeedLines
+                : undefined
+            }
           />
         </div>
       )}
@@ -937,7 +963,111 @@ export default async function RequestDetailPage({
             </section>
           )}
 
-          {closeoutRow && (
+          {request.category === "installation" && (installationDetails || installationItems.length > 0) && (
+            <section className="bg-white border border-slate-200 rounded-xl p-5">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <h2 className="text-sm font-semibold text-slate-900">Installation / Buildup details</h2>
+                {canGenerateFulfillmentDocs && status === "closed" && (
+                  <a
+                    href={`/api/requests/${id}/closure-document`}
+                    className="text-xs text-[var(--accent)] underline whitespace-nowrap"
+                  >
+                    Download closure document (PDF)
+                  </a>
+                )}
+              </div>
+              <dl className="space-y-2 text-sm mb-4">
+                <Row label="Site location" value={installationDetails?.site_location ?? "—"} />
+                <Row
+                  label="Scheduled"
+                  value={
+                    installationDetails?.scheduled_date
+                      ? `${format(parseISO(installationDetails.scheduled_date), "MMM d, yyyy")}${
+                          installationDetails.scheduled_time
+                            ? ` · ${installationDetails.scheduled_time}`
+                            : ""
+                        }`
+                      : "—"
+                  }
+                />
+              </dl>
+
+              {installationItems.length > 0 && (
+                <div className="mb-4">
+                  <h3 className="text-xs font-semibold text-slate-500 mb-2 uppercase">Items</h3>
+                  <div className="overflow-hidden border border-slate-200 rounded-lg">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+                        <tr>
+                          <th className="text-left px-3 py-2 font-medium">#</th>
+                          <th className="text-left px-3 py-2 font-medium">Item</th>
+                          <th className="text-left px-3 py-2 font-medium">Qty</th>
+                          <th className="text-left px-3 py-2 font-medium">Image</th>
+                          <th className="text-left px-3 py-2 font-medium">Location</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {installationItems.map((it) => (
+                          <tr key={it.id}>
+                            <td className="px-3 py-2 text-slate-500">{it.item_no}</td>
+                            <td className="px-3 py-2 text-slate-900">{it.item_name}</td>
+                            <td className="px-3 py-2 text-slate-700">{it.required_quantity}</td>
+                            <td className="px-3 py-2">
+                              {it.image_url ? (
+                                <a href={it.image_url} target="_blank" rel="noreferrer">
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={it.image_url}
+                                    alt={it.item_name}
+                                    className="w-10 h-10 object-cover rounded"
+                                  />
+                                </a>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-slate-700">{it.current_location ?? "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {installationCrew.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-semibold text-slate-500 mb-2 uppercase">Crew needed</h3>
+                  <div className="overflow-hidden border border-slate-200 rounded-lg">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+                        <tr>
+                          <th className="text-left px-3 py-2 font-medium">Type</th>
+                          <th className="text-left px-3 py-2 font-medium">Qty</th>
+                          <th className="text-left px-3 py-2 font-medium">Nature of work</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {installationCrew.map((l) => (
+                          <tr key={l.id}>
+                            <td className="px-3 py-2 text-slate-900">
+                              {personnelTypeLabel(l.personnel_type)}
+                            </td>
+                            <td className="px-3 py-2 text-slate-700">{l.quantity}</td>
+                            <td className="px-3 py-2 text-slate-700">
+                              {natureOfWorkLabel(l.nature_of_work)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+
+                    {closeoutRow && (
             <section className="bg-white border border-slate-200 rounded-xl p-5">
               <h2 className="text-sm font-semibold text-slate-900 mb-3">
                 Closeout documents
@@ -974,7 +1104,7 @@ export default async function RequestDetailPage({
                 <PhotoGrid label="Items procured" photos={closeoutRow.procurement_photos} />
               )}
 
-              {request.category === "labor" &&
+              {(request.category === "labor" || request.category === "installation") &&
                 (laborCloseoutLines as LaborCloseoutLine[] | null)?.length ? (
                 <div className="mt-4">
                   <h3 className="text-xs font-semibold text-slate-500 mb-2 uppercase">

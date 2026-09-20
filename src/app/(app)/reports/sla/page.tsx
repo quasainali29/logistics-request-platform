@@ -8,7 +8,7 @@ import { ReportsNav } from "../ReportsNav";
 import { StatCard } from "../_components/StatCard";
 import { BarList } from "../_components/BarList";
 
-const CATEGORIES: Category[] = ["delivery", "labor", "maintenance", "procurement"];
+const CATEGORIES: Category[] = ["delivery", "labor", "maintenance", "procurement", "installation"];
 
 function isTerminal(stages: WorkflowStage[], category: string, status: string) {
   return stages.some((s) => s.category === category && s.key === status && s.is_terminal);

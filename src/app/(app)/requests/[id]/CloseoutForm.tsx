@@ -85,7 +85,7 @@ export function CloseoutForm({
           keeps a lightweight personnel-deployed confirmation, since that
           reflects who actually showed up rather than anything captured by
           the technician flow. */}
-      {category === "labor" && (
+      {(category === "labor" || category === "installation") && (
         <div>
           <p className="text-xs font-semibold text-slate-500 uppercase mb-1">
             Personnel deployed

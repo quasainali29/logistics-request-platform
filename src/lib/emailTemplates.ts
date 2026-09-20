@@ -296,6 +296,32 @@ export async function fetchCategoryDetails(
       const neededBy = formatEmailDate(details?.needed_by_date);
       if (neededBy) rows.push({ label: "Needed by", value: neededBy });
       if (count) rows.push({ label: "Items", value: `${count} item${count === 1 ? "" : "s"}` });
+    } else if (category === "installation") {
+      const [{ data: details }, { count }, { data: crew }] = await Promise.all([
+        supabase
+          .from("installation_details")
+          .select("site_location, scheduled_date, scheduled_time")
+          .eq("request_id", requestId)
+          .maybeSingle(),
+        supabase
+          .from("installation_items")
+          .select("id", { count: "exact", head: true })
+          .eq("request_id", requestId),
+        supabase
+          .from("installation_crew_lines")
+          .select("personnel_type, quantity")
+          .eq("request_id", requestId),
+      ]);
+      if (details?.site_location) {
+        rows.push({ label: "Site location", value: escapeHtml(details.site_location) });
+      }
+      const when = formatEmailDate(details?.scheduled_date, details?.scheduled_time);
+      if (when) rows.push({ label: "Scheduled for", value: when });
+      if (count) rows.push({ label: "Items", value: `${count} item${count === 1 ? "" : "s"}` });
+      if (crew && crew.length > 0) {
+        const summary = crew.map((l) => `${l.quantity}× ${l.personnel_type}`).join(", ");
+        rows.push({ label: "Crew", value: escapeHtml(summary) });
+      }
     }
   } catch (err) {
     console.error("Failed to fetch category details for email:", err);
