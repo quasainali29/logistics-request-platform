@@ -11,7 +11,7 @@ import {
   type SyntheticEvent,
 } from "react";
 import { createRequest, updateRequest, managerEditRequest } from "../actions";
-import { MAINTENANCE_TYPES, PURCHASING_CATEGORIES, NATURE_OF_WORK_OPTIONS, LABOR_TYPES, type Category, type Project, type Department } from "@/lib/types";
+import { MAINTENANCE_TYPES, PURCHASING_CATEGORIES, NATURE_OF_WORK_OPTIONS, LABOR_TYPES, PRIORITY_DUE_OFFSET_DAYS, type Category, type Project, type Department, type Priority } from "@/lib/types";
 import { uploadAttachment, uploadAttachments } from "@/lib/uploadAttachment";
 import { compressImage, compressImages } from "@/lib/compressImage";
 
@@ -279,6 +279,76 @@ export default function RequestForm({
       | null;
     if (el) el.value = value;
   }
+
+  // -- Auto-calculated Conclude by / category schedule date ---------------
+  // "Conclude by" defaults to Date required + a priority-based SLA offset
+  // (matching the windows already shown in the Priority dropdown's own
+  // labels), and each category's own schedule date (Requested date,
+  // Scheduled date, Date from, Needed by) defaults to Date required too --
+  // both stay in sync as long as the requester hasn't edited that field
+  // by hand. setFieldValue() above sets .value without dispatching an
+  // input/change event, so these auto-fills never trip the "manually
+  // edited" tracking below or loop back into themselves.
+  const CATEGORY_DATE_FIELD: Partial<Record<Category, string>> = {
+    delivery: "delivery_requested_date",
+    maintenance: "maintenance_date",
+    labor: "labor_date_from",
+    procurement: "procurement_needed_by",
+    installation: "installation_date",
+  };
+  // Seeded from initial data so opening an existing request for editing
+  // doesn't silently recompute a date someone already chose.
+  const manualOverrideRef = useRef<Record<string, boolean>>({
+    conclude_date: !!initial?.conclude_date,
+    delivery_requested_date: !!initial?.delivery_requested_date,
+    maintenance_date: !!initial?.maintenance_date,
+    labor_date_from: !!initial?.labor_date_from,
+    procurement_needed_by: !!initial?.procurement_needed_by,
+    installation_date: !!initial?.installation_date,
+  });
+
+  function addDaysToDateString(dateStr: string, days: number): string {
+    const d = new Date(`${dateStr}T00:00:00`);
+    d.setDate(d.getDate() + days);
+    return d.toISOString().slice(0, 10);
+  }
+
+  function recalcConcludeDate(dateRequired: string, priority: string) {
+    if (manualOverrideRef.current.conclude_date) return;
+    if (!dateRequired) return;
+    const offset = PRIORITY_DUE_OFFSET_DAYS[priority as Priority];
+    if (offset == null) return;
+    setFieldValue("conclude_date", addDaysToDateString(dateRequired, offset));
+  }
+
+  function recalcCategoryDate(dateRequired: string, cat: Category | "") {
+    const fieldName = cat ? CATEGORY_DATE_FIELD[cat] : undefined;
+    if (!fieldName) return;
+    if (manualOverrideRef.current[fieldName]) return;
+    if (!dateRequired) return;
+    setFieldValue(fieldName, dateRequired);
+  }
+
+  function markManualOverride(name: string) {
+    manualOverrideRef.current[name] = true;
+  }
+
+  function currentFieldValue(name: string): string {
+    const el = formRef.current?.elements.namedItem(name) as
+      | HTMLInputElement
+      | HTMLSelectElement
+      | null;
+    return el?.value ?? "";
+  }
+
+  // The category-specific date field doesn't exist in the DOM until its
+  // section mounts (same timing issue as pendingCategoryFillRef above),
+  // so sync it once the section for the newly-selected category appears.
+  useEffect(() => {
+    const dateRequired = currentFieldValue("date_required");
+    if (dateRequired) recalcCategoryDate(dateRequired, category);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category]);
 
   function applyCategoryFields(data: AutoFillResult) {
     const newHighlights: string[] = [];
@@ -671,7 +741,12 @@ export default function RequestForm({
           <Field label="Priority">
             {/* SLA windows shown directly in the option labels so they're
                 visible both closed and open, with no extra UI needed. */}
-            <select name="priority" defaultValue={initial?.priority ?? "medium"} className={inputClass}>
+            <select
+              name="priority"
+              defaultValue={initial?.priority ?? "medium"}
+              onChange={(e) => recalcConcludeDate(currentFieldValue("date_required"), e.target.value)}
+              className={inputClass}
+            >
               <option value="low">Low (1 week)</option>
               <option value="medium">Medium (3-4 days)</option>
               <option value="high">High (24-48 hours)</option>
@@ -741,6 +816,10 @@ export default function RequestForm({
               type="date"
               name="date_required"
               defaultValue={initial?.date_required ?? ""}
+              onChange={(e) => {
+                recalcConcludeDate(e.target.value, currentFieldValue("priority"));
+                recalcCategoryDate(e.target.value, category);
+              }}
               className={inputClass}
             />
           </Field>
@@ -750,6 +829,7 @@ export default function RequestForm({
               type="date"
               name="conclude_date"
               defaultValue={initial?.conclude_date ?? ""}
+              onChange={() => markManualOverride("conclude_date")}
               className={inputClass}
             />
           </Field>
@@ -791,6 +871,7 @@ export default function RequestForm({
                 type="date"
                 name="delivery_requested_date"
                 defaultValue={initial?.delivery_requested_date ?? ""}
+                onChange={() => markManualOverride("delivery_requested_date")}
                 className={inputClass}
               />
             </Field>
@@ -899,6 +980,7 @@ export default function RequestForm({
                 type="date"
                 name="labor_date_from"
                 defaultValue={initial?.labor_date_from ?? ""}
+                onChange={() => markManualOverride("labor_date_from")}
                 className={inputClass}
               />
             </Field>
@@ -1040,6 +1122,7 @@ export default function RequestForm({
                 type="date"
                 name="maintenance_date"
                 defaultValue={initial?.maintenance_date ?? ""}
+                onChange={() => markManualOverride("maintenance_date")}
                 className={inputClass}
               />
             </Field>
@@ -1161,6 +1244,7 @@ export default function RequestForm({
               type="date"
               name="procurement_needed_by"
               defaultValue={initial?.procurement_needed_by ?? ""}
+              onChange={() => markManualOverride("procurement_needed_by")}
               className={inputClass}
             />
           </Field>
@@ -1257,6 +1341,7 @@ export default function RequestForm({
                 type="date"
                 name="installation_date"
                 defaultValue={initial?.installation_date ?? ""}
+                onChange={() => markManualOverride("installation_date")}
                 className={inputClass}
               />
             </Field>

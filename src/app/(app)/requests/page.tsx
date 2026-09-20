@@ -98,7 +98,7 @@ export default async function RequestsPage({
   // statuses -- see terminalStatusKeys below. A request whose (category,
   // status) pair is marked terminal in the workflow builder (currently
   // "completed", "closed", and "rejected" everywhere) is done, so it
-  // should never show up under "Overdue" regardless of date_required,
+  // should never show up under "Overdue" regardless of conclude_date,
   // matching the red-highlight logic RequestsTable.tsx already applies.
   const stageList = await getWorkflowStages();
   const terminalStatusKeys = Array.from(
@@ -134,13 +134,13 @@ export default async function RequestsPage({
     if (dateFrom) query = query.gte("created_at", `${dateFrom}T00:00:00`);
     if (dateTo) query = query.lte("created_at", `${dateTo}T23:59:59`);
     if (due === "overdue") {
-      query = query.lt("date_required", today);
+      query = query.lt("conclude_date", today);
       if (terminalStatusKeys.length) query = query.not("status", "in", `(${terminalStatusKeys.join(",")})`);
     }
     else if (due === "next7" || due === "next30") {
       const upper = new Date();
       upper.setDate(upper.getDate() + (due === "next7" ? 7 : 30));
-      query = query.gte("date_required", today).lte("date_required", upper.toISOString().slice(0, 10));
+      query = query.gte("conclude_date", today).lte("conclude_date", upper.toISOString().slice(0, 10));
     }
 
     const { data, count } = await query.order("created_at", { ascending: false });
@@ -177,18 +177,18 @@ export default async function RequestsPage({
     if (dateFrom) query = query.gte("created_at", `${dateFrom}T00:00:00`);
     if (dateTo) query = query.lte("created_at", `${dateTo}T23:59:59`);
     if (due === "overdue") {
-      query = query.lt("date_required", today);
+      query = query.lt("conclude_date", today);
       if (terminalStatusKeys.length) query = query.not("status", "in", `(${terminalStatusKeys.join(",")})`);
     }
     else if (due === "next7" || due === "next30") {
       const upper = new Date();
       upper.setDate(upper.getDate() + (due === "next7" ? 7 : 30));
-      query = query.gte("date_required", today).lte("date_required", upper.toISOString().slice(0, 10));
+      query = query.gte("conclude_date", today).lte("conclude_date", upper.toISOString().slice(0, 10));
     }
 
     let ordered;
     if (sort === "oldest") ordered = query.order("created_at", { ascending: true });
-    else if (sort === "due") ordered = query.order("date_required", { ascending: true, nullsFirst: false });
+    else if (sort === "due") ordered = query.order("conclude_date", { ascending: true, nullsFirst: false });
     else ordered = query.order("created_at", { ascending: false });
 
     const { data, count } = await ordered.range(from, to);

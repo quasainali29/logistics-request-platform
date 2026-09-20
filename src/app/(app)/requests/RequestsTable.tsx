@@ -48,13 +48,15 @@ export default function RequestsTable({
   // passed (not today), and the request hasn't reached a terminal stage
   // for its category -- a closed/completed/rejected request is never
   // flagged even if its due date is in the past.
+  // "Due" is the Conclude by date, not Date required -- Conclude by is
+  // when the job needs to be wrapped up, which is what "overdue" means.
   function isOverdue(r: RequestRow) {
-    if (!r.date_required) return false;
+    if (!r.conclude_date) return false;
     const terminal =
       stageList.find((s) => s.category === r.category && s.key === r.status)?.is_terminal ??
       false;
     if (terminal) return false;
-    const due = parseISO(r.date_required);
+    const due = parseISO(r.conclude_date);
     return isPast(due) && !isToday(due);
   }
 
@@ -219,21 +221,21 @@ export default function RequestsTable({
                   )}
                 </td>
                 <td className="px-4 py-3">
-                  {r.date_required ? (
+                  {r.conclude_date ? (
                     isOverdue(r) ? (
                       <>
                         <p className="text-red-600 font-medium flex items-center gap-1">
                           <AlertTriangle className="w-3.5 h-3.5" />
-                          {format(parseISO(r.date_required), "MMM d, yyyy")}
+                          {format(parseISO(r.conclude_date), "MMM d, yyyy")}
                         </p>
                         <p className="text-xs text-red-600">
-                          {differenceInCalendarDays(new Date(), parseISO(r.date_required))} days
+                          {differenceInCalendarDays(new Date(), parseISO(r.conclude_date))} days
                           overdue
                         </p>
                       </>
                     ) : (
                       <span className="text-slate-600">
-                        {format(parseISO(r.date_required), "MMM d, yyyy")}
+                        {format(parseISO(r.conclude_date), "MMM d, yyyy")}
                       </span>
                     )
                   ) : (

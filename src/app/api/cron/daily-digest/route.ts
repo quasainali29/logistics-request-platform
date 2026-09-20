@@ -20,8 +20,8 @@ export async function GET(req: NextRequest) {
 
   const { data: overdue } = await supabase
     .from("requests")
-    .select("request_number, title, date_required")
-    .lt("date_required", today)
+    .select("request_number, title, conclude_date")
+    .lt("conclude_date", today)
     .not("status", "in", "(completed,closed,rejected)");
 
   const { data: vehiclesExpiring } = await supabase
@@ -152,7 +152,7 @@ export async function GET(req: NextRequest) {
       ${
         overdue && overdue.length > 0
           ? `<h3>Overdue requests (${overdue.length})</h3><ul>${overdue
-              .map((r) => `<li>${r.request_number} — ${r.title} (due ${r.date_required})</li>`)
+              .map((r) => `<li>${r.request_number} — ${r.title} (due ${r.conclude_date})</li>`)
               .join("")}</ul>`
           : ""
       }

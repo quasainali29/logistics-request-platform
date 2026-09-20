@@ -23,10 +23,10 @@ export async function GET(req: NextRequest) {
   let query = supabase
     .from("requests")
     .select(
-      "request_number, title, category, status, date_required, owner:profiles!requests_owner_id_fkey(full_name)"
+      "request_number, title, category, status, conclude_date, owner:profiles!requests_owner_id_fkey(full_name)"
     )
-    .not("date_required", "is", null)
-    .lt("date_required", today.toISOString().slice(0, 10));
+    .not("conclude_date", "is", null)
+    .lt("conclude_date", today.toISOString().slice(0, 10));
   if (category) query = query.eq("category", category);
 
   const { data } = await query;
@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
     title: string;
     category: string;
     status: string;
-    date_required: string;
+    conclude_date: string;
     owner: { full_name: string } | null;
   }[]).filter((r) => !isTerminal(stages, r.category, r.status));
 
@@ -48,8 +48,8 @@ export async function GET(req: NextRequest) {
       CATEGORY_LABELS[r.category as Category] ?? r.category,
       formatStatusLabel(r.category, r.status, stages),
       r.owner?.full_name ?? "Unassigned",
-      r.date_required,
-      differenceInCalendarDays(today, parseISO(r.date_required)),
+      r.conclude_date,
+      differenceInCalendarDays(today, parseISO(r.conclude_date)),
     ])
   );
 }

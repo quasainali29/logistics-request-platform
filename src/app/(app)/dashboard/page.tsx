@@ -47,7 +47,7 @@ export default async function DashboardPage({
   const isTechnician = profile.role === "technician";
 
   // Coordinator and technician dashboards below are period-scoped: every
-  // card reflects requests/jobs whose date_required falls in this window,
+  // card reflects requests/jobs whose conclude_date falls in this window,
   // rather than all-time totals. Defaults to the trailing 30 days when no
   // ?from=/&to= is present. The "previous period" is the same length,
   // immediately preceding -- used for the trend arrows on the top cards.
@@ -87,7 +87,7 @@ export default async function DashboardPage({
       category: string;
       status: string;
       priority: string;
-      date_required: string | null;
+      conclude_date: string | null;
       updated_at: string;
       assigned_at: string;
       accepted_at: string | null;
@@ -97,7 +97,7 @@ export default async function DashboardPage({
       supabase
         .from("request_technicians")
         .select(
-          "assigned_at, accepted_at, request:requests(id, request_number, title, category, status, priority, date_required, updated_at)"
+          "assigned_at, accepted_at, request:requests(id, request_number, title, category, status, priority, conclude_date, updated_at)"
         )
         .eq("technician_id", profile.id),
       getWorkflowStages(),
@@ -111,10 +111,10 @@ export default async function DashboardPage({
       })
       .filter((r): r is TechJob => r !== null)
       .sort((a, b) => {
-        if (!a.date_required && !b.date_required) return 0;
-        if (!a.date_required) return 1;
-        if (!b.date_required) return -1;
-        return new Date(a.date_required).getTime() - new Date(b.date_required).getTime();
+        if (!a.conclude_date && !b.conclude_date) return 0;
+        if (!a.conclude_date) return 1;
+        if (!b.conclude_date) return -1;
+        return new Date(a.conclude_date).getTime() - new Date(b.conclude_date).getTime();
       });
     const isTerminal = (category: string, statusKey: string) =>
       stageList.find((s) => s.category === category && s.key === statusKey)?.is_terminal ??
@@ -123,21 +123,21 @@ export default async function DashboardPage({
     // Every card below is scoped to jobs whose due date falls in the
     // selected period (see periodFrom/periodTo above), so "Total assigned"
     // etc. read as "assigned in period" rather than all-time totals.
-    const cohort = jobs.filter((r) => inPeriod(r.date_required));
-    const prevCohort = jobs.filter((r) => inPrevPeriod(r.date_required));
+    const cohort = jobs.filter((r) => inPeriod(r.conclude_date));
+    const prevCohort = jobs.filter((r) => inPrevPeriod(r.conclude_date));
     const cohortCompleted = cohort.filter((r) => ["completed", "closed"].includes(r.status));
     const prevCohortCompleted = prevCohort.filter((r) => ["completed", "closed"].includes(r.status));
 
     const dueToday = cohort.filter(
-      (r) => r.date_required && isToday(parseISO(r.date_required)) && !isTerminal(r.category, r.status)
+      (r) => r.conclude_date && isToday(parseISO(r.conclude_date)) && !isTerminal(r.category, r.status)
     );
     const dueSoon = cohort.filter(
       (r) =>
-        r.date_required &&
+        r.conclude_date &&
         !isTerminal(r.category, r.status) &&
-        !isToday(parseISO(r.date_required)) &&
-        isFuture(parseISO(r.date_required)) &&
-        differenceInCalendarDays(parseISO(r.date_required), new Date()) <= 7
+        !isToday(parseISO(r.conclude_date)) &&
+        isFuture(parseISO(r.conclude_date)) &&
+        differenceInCalendarDays(parseISO(r.conclude_date), new Date()) <= 7
     );
 
     // SLA score: turnaround from when the job was handed to this
@@ -165,10 +165,10 @@ export default async function DashboardPage({
       const scored: { score: number; actualDays: number; targetDays: number }[] = [];
       for (const r of cohortCompleted) {
         const signedAt = signedAtByRequest.get(r.id);
-        if (!signedAt || !r.date_required) continue;
+        if (!signedAt || !r.conclude_date) continue;
         const actualDays = differenceInCalendarDays(parseISO(signedAt), parseISO(r.assigned_at));
         if (actualDays < 0) continue;
-        const targetDays = differenceInCalendarDays(parseISO(r.date_required), parseISO(r.assigned_at));
+        const targetDays = differenceInCalendarDays(parseISO(r.conclude_date), parseISO(r.assigned_at));
         const score =
           actualDays <= 0 || actualDays <= targetDays
             ? 100
@@ -225,12 +225,12 @@ export default async function DashboardPage({
     const overdueJobs = cohort
       .filter(
         (r) =>
-          r.date_required &&
-          isPast(parseISO(r.date_required)) &&
-          !isToday(parseISO(r.date_required)) &&
+          r.conclude_date &&
+          isPast(parseISO(r.conclude_date)) &&
+          !isToday(parseISO(r.conclude_date)) &&
           !isTerminal(r.category, r.status)
       )
-      .sort((a, b) => parseISO(a.date_required as string).getTime() - parseISO(b.date_required as string).getTime());
+      .sort((a, b) => parseISO(a.conclude_date as string).getTime() - parseISO(b.conclude_date as string).getTime());
 
     const metrics = [
       {
@@ -301,7 +301,7 @@ export default async function DashboardPage({
             stageList={stageList}
             emptyText="Nothing due today."
             extraHeader="Due"
-            renderExtra={(r) => (r.date_required ? format(parseISO(r.date_required), "MMM d") : "—")}
+            renderExtra={(r) => (r.conclude_date ? format(parseISO(r.conclude_date), "MMM d") : "—")}
           />
           <RequestMiniTable
             title="New jobs"
@@ -320,7 +320,7 @@ export default async function DashboardPage({
             emptyText="Nothing overdue."
             extraHeader="Overdue by"
             renderExtra={(r) =>
-              `${differenceInCalendarDays(new Date(), parseISO(r.date_required as string))} days`
+              `${differenceInCalendarDays(new Date(), parseISO(r.conclude_date as string))} days`
             }
             moreCount={Math.max(0, overdueJobs.length - 5)}
             moreHref="/requests?due=overdue"
@@ -340,10 +340,10 @@ export default async function DashboardPage({
       supabase
         .from("requests")
         .select(
-          "id, request_number, title, category, status, priority, date_required, date_requested, updated_at, created_at, owner_assigned_at"
+          "id, request_number, title, category, status, priority, conclude_date, date_requested, updated_at, created_at, owner_assigned_at"
         )
         .eq("owner_id", profile.id)
-        .order("date_required", { ascending: true, nullsFirst: false }),
+        .order("conclude_date", { ascending: true, nullsFirst: false }),
       getWorkflowStages(),
     ]);
 
@@ -355,21 +355,21 @@ export default async function DashboardPage({
     // Every card below is scoped to requests whose due date falls in the
     // selected period (see periodFrom/periodTo above), so "Total assigned"
     // etc. read as "assigned in period" rather than all-time totals.
-    const cohort = myReqs.filter((r) => inPeriod(r.date_required));
-    const prevCohort = myReqs.filter((r) => inPrevPeriod(r.date_required));
+    const cohort = myReqs.filter((r) => inPeriod(r.conclude_date));
+    const prevCohort = myReqs.filter((r) => inPrevPeriod(r.conclude_date));
     const cohortCompleted = cohort.filter((r) => ["completed", "closed"].includes(r.status));
     const prevCohortCompleted = prevCohort.filter((r) => ["completed", "closed"].includes(r.status));
 
     const dueToday = cohort.filter(
-      (r) => r.date_required && isToday(parseISO(r.date_required)) && !isTerminal(r.category, r.status)
+      (r) => r.conclude_date && isToday(parseISO(r.conclude_date)) && !isTerminal(r.category, r.status)
     );
     const dueSoon = cohort.filter(
       (r) =>
-        r.date_required &&
+        r.conclude_date &&
         !isTerminal(r.category, r.status) &&
-        !isToday(parseISO(r.date_required)) &&
-        isFuture(parseISO(r.date_required)) &&
-        differenceInCalendarDays(parseISO(r.date_required), new Date()) <= 7
+        !isToday(parseISO(r.conclude_date)) &&
+        isFuture(parseISO(r.conclude_date)) &&
+        differenceInCalendarDays(parseISO(r.conclude_date), new Date()) <= 7
     );
 
     // SLA score: turnaround from submission (date_requested) to closure
@@ -382,10 +382,10 @@ export default async function DashboardPage({
     let avgPromisedDays: number | null = null;
     const scored: { score: number; actualDays: number; targetDays: number }[] = [];
     for (const r of cohortCompleted) {
-      if (!r.date_requested || !r.date_required) continue;
+      if (!r.date_requested || !r.conclude_date) continue;
       const actualDays = differenceInCalendarDays(parseISO(r.updated_at), parseISO(r.date_requested));
       if (actualDays < 0) continue;
-      const targetDays = differenceInCalendarDays(parseISO(r.date_required), parseISO(r.date_requested));
+      const targetDays = differenceInCalendarDays(parseISO(r.conclude_date), parseISO(r.date_requested));
       const score =
         actualDays <= 0 || actualDays <= targetDays
           ? 100
@@ -482,12 +482,12 @@ export default async function DashboardPage({
     const overdueRequests = cohort
       .filter(
         (r) =>
-          r.date_required &&
-          isPast(parseISO(r.date_required)) &&
-          !isToday(parseISO(r.date_required)) &&
+          r.conclude_date &&
+          isPast(parseISO(r.conclude_date)) &&
+          !isToday(parseISO(r.conclude_date)) &&
           !isTerminal(r.category, r.status)
       )
-      .sort((a, b) => parseISO(a.date_required as string).getTime() - parseISO(b.date_required as string).getTime());
+      .sort((a, b) => parseISO(a.conclude_date as string).getTime() - parseISO(b.conclude_date as string).getTime());
 
     const metrics = [
       {
@@ -563,7 +563,7 @@ export default async function DashboardPage({
             stageList={stageList}
             emptyText="Nothing due today."
             extraHeader="Due"
-            renderExtra={(r) => (r.date_required ? format(parseISO(r.date_required), "MMM d") : "—")}
+            renderExtra={(r) => (r.conclude_date ? format(parseISO(r.conclude_date), "MMM d") : "—")}
           />
           <RequestMiniTable
             title="New requests"
@@ -585,7 +585,7 @@ export default async function DashboardPage({
             emptyText="Nothing overdue."
             extraHeader="Overdue by"
             renderExtra={(r) =>
-              `${differenceInCalendarDays(new Date(), parseISO(r.date_required as string))} days`
+              `${differenceInCalendarDays(new Date(), parseISO(r.conclude_date as string))} days`
             }
             moreCount={Math.max(0, overdueRequests.length - 5)}
             moreHref="/requests?due=overdue"
@@ -602,7 +602,7 @@ export default async function DashboardPage({
   let query = supabase
     .from("requests")
     .select(
-      "id, request_number, title, category, status, priority, date_required, updated_at, owner_id, requestor_id, created_at"
+      "id, request_number, title, category, status, priority, conclude_date, updated_at, owner_id, requestor_id, created_at"
     );
 
   if (!isStaff) {
@@ -627,9 +627,9 @@ export default async function DashboardPage({
   );
   const overdue = all.filter(
     (r) =>
-      r.date_required &&
-      isPast(parseISO(r.date_required)) &&
-      !isToday(parseISO(r.date_required)) &&
+      r.conclude_date &&
+      isPast(parseISO(r.conclude_date)) &&
+      !isToday(parseISO(r.conclude_date)) &&
       !isTerminal(r.category, r.status)
   );
   // "Completed this month" specifically tracks the successful-completion
@@ -644,10 +644,10 @@ export default async function DashboardPage({
   });
 
   const dueSoon = all
-    .filter((r) => r.date_required && !isTerminal(r.category, r.status))
+    .filter((r) => r.conclude_date && !isTerminal(r.category, r.status))
     .sort(
       (a, b) =>
-        new Date(a.date_required!).getTime() - new Date(b.date_required!).getTime()
+        new Date(a.conclude_date!).getTime() - new Date(b.conclude_date!).getTime()
     )
     .slice(0, 6);
 
@@ -669,14 +669,14 @@ export default async function DashboardPage({
   // "assigned to me" timestamp to key off of -- "new" here means recently
   // submitted rather than recently routed to a specific person.
   const dueTodayGeneral = all.filter(
-    (r) => r.date_required && isToday(parseISO(r.date_required)) && !isTerminal(r.category, r.status)
+    (r) => r.conclude_date && isToday(parseISO(r.conclude_date)) && !isTerminal(r.category, r.status)
   );
   const twoDaysAgoGeneral = subDays(new Date(), 2);
   const newRequestsGeneral = all
     .filter((r) => parseISO(r.created_at) >= twoDaysAgoGeneral)
     .sort((a, b) => parseISO(b.created_at).getTime() - parseISO(a.created_at).getTime());
   const overdueSorted = [...overdue].sort(
-    (a, b) => parseISO(a.date_required as string).getTime() - parseISO(b.date_required as string).getTime()
+    (a, b) => parseISO(a.conclude_date as string).getTime() - parseISO(b.conclude_date as string).getTime()
   );
 
   const metrics = [
@@ -758,7 +758,7 @@ export default async function DashboardPage({
           stageList={stageList}
           emptyText="Nothing due today."
           extraHeader="Due"
-          renderExtra={(r) => (r.date_required ? format(parseISO(r.date_required), "MMM d") : "—")}
+          renderExtra={(r) => (r.conclude_date ? format(parseISO(r.conclude_date), "MMM d") : "—")}
         />
         <RequestMiniTable
           title="New requests"
@@ -777,7 +777,7 @@ export default async function DashboardPage({
           emptyText="Nothing overdue."
           extraHeader="Overdue by"
           renderExtra={(r) =>
-            `${differenceInCalendarDays(new Date(), parseISO(r.date_required as string))} days`
+            `${differenceInCalendarDays(new Date(), parseISO(r.conclude_date as string))} days`
           }
           moreCount={Math.max(0, overdue.length - 5)}
           moreHref="/requests?due=overdue"
@@ -837,7 +837,7 @@ export default async function DashboardPage({
                     <div className="min-w-0">
                       <p className="text-sm text-slate-900 truncate">{r.title}</p>
                       <p className="text-xs text-slate-500">
-                        Due {format(parseISO(r.date_required!), "MMM d, yyyy")}
+                        Due {format(parseISO(r.conclude_date!), "MMM d, yyyy")}
                       </p>
                     </div>
                     <span
@@ -923,7 +923,7 @@ interface MiniRow {
   category: string;
   priority: string;
   status: string;
-  date_required: string | null;
+  conclude_date: string | null;
 }
 
 function RequestMiniTable({

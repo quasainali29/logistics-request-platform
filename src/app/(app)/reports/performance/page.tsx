@@ -54,24 +54,24 @@ export default async function PerformanceReportPage({
   const supabase = await createClient();
   const stages = await getWorkflowStages();
 
-  // Org-wide request set for this date range, scoped by date_required
+  // Org-wide request set for this date range, scoped by conclude_date
   // (due date) -- the same period-scoping convention the coordinator and
   // technician dashboards use, so "Overall" here always agrees with those
   // pages for the same range.
   const { data: reqRows } = await supabase
     .from("requests")
     .select(
-      "id, category, status, priority, date_required, date_requested, updated_at, created_at, owner_id, owner:profiles!requests_owner_id_fkey(full_name)"
+      "id, category, status, priority, conclude_date, date_requested, updated_at, created_at, owner_id, owner:profiles!requests_owner_id_fkey(full_name)"
     )
-    .gte("date_required", from)
-    .lte("date_required", to);
+    .gte("conclude_date", from)
+    .lte("conclude_date", to);
 
   type ReqRow = {
     id: string;
     category: string;
     status: string;
     priority: string;
-    date_required: string;
+    conclude_date: string;
     date_requested: string;
     updated_at: string;
     created_at: string;
@@ -89,10 +89,10 @@ export default async function PerformanceReportPage({
   // every request in range rather than one owner's.
   const scored: { score: number; actualDays: number; targetDays: number }[] = [];
   for (const r of completed) {
-    if (!r.date_requested || !r.date_required) continue;
+    if (!r.date_requested || !r.conclude_date) continue;
     const actualDays = differenceInCalendarDays(parseISO(r.updated_at), parseISO(r.date_requested));
     if (actualDays < 0) continue;
-    const targetDays = differenceInCalendarDays(parseISO(r.date_required), parseISO(r.date_requested));
+    const targetDays = differenceInCalendarDays(parseISO(r.conclude_date), parseISO(r.date_requested));
     scored.push({ score: scoreTurnaround(actualDays, targetDays), actualDays, targetDays });
   }
   const slaScore =
@@ -185,10 +185,10 @@ export default async function PerformanceReportPage({
       const done = isTerminal(stages, r.category, r.status);
       if (done) {
         agg.completed += 1;
-        if (r.date_requested && r.date_required) {
+        if (r.date_requested && r.conclude_date) {
           const actualDays = differenceInCalendarDays(parseISO(r.updated_at), parseISO(r.date_requested));
           if (actualDays >= 0) {
-            const targetDays = differenceInCalendarDays(parseISO(r.date_required), parseISO(r.date_requested));
+            const targetDays = differenceInCalendarDays(parseISO(r.conclude_date), parseISO(r.date_requested));
             agg.scores.push(scoreTurnaround(actualDays, targetDays));
           }
         }
@@ -233,7 +233,7 @@ export default async function PerformanceReportPage({
     const { data: jobRows } = await supabase
       .from("request_technicians")
       .select(
-        "technician_id, assigned_at, accepted_at, technician:profiles!request_technicians_technician_id_fkey(full_name), request:requests(id, category, status, date_required)"
+        "technician_id, assigned_at, accepted_at, technician:profiles!request_technicians_technician_id_fkey(full_name), request:requests(id, category, status, conclude_date)"
       );
 
     type JobRow = {
@@ -241,11 +241,11 @@ export default async function PerformanceReportPage({
       assigned_at: string;
       accepted_at: string | null;
       technician: { full_name: string } | null;
-      request: { id: string; category: string; status: string; date_required: string | null } | null;
+      request: { id: string; category: string; status: string; conclude_date: string | null } | null;
     };
     const allJobs = (jobRows ?? []) as unknown as JobRow[];
     const cohortJobs = allJobs.filter(
-      (j) => j.request?.date_required && j.request.date_required >= from && j.request.date_required <= to
+      (j) => j.request?.conclude_date && j.request.conclude_date >= from && j.request.conclude_date <= to
     );
 
     const completedJobs = cohortJobs.filter(
@@ -274,10 +274,10 @@ export default async function PerformanceReportPage({
       if (done) {
         agg.completed += 1;
         const signedAt = closeoutMap.get(j.request.id);
-        if (signedAt && j.request.date_required) {
+        if (signedAt && j.request.conclude_date) {
           const actualDays = differenceInCalendarDays(parseISO(signedAt), parseISO(j.assigned_at));
           if (actualDays >= 0) {
-            const targetDays = differenceInCalendarDays(parseISO(j.request.date_required), parseISO(j.assigned_at));
+            const targetDays = differenceInCalendarDays(parseISO(j.request.conclude_date), parseISO(j.assigned_at));
             agg.scores.push(scoreTurnaround(actualDays, targetDays));
           }
         }

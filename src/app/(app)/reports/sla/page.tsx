@@ -38,10 +38,10 @@ export default async function SlaReportPage({
   let overdueQuery = supabase
     .from("requests")
     .select(
-      "id, request_number, title, category, status, date_required, owner:profiles!requests_owner_id_fkey(full_name)"
+      "id, request_number, title, category, status, conclude_date, owner:profiles!requests_owner_id_fkey(full_name)"
     )
-    .not("date_required", "is", null)
-    .lt("date_required", today.toISOString().slice(0, 10));
+    .not("conclude_date", "is", null)
+    .lt("conclude_date", today.toISOString().slice(0, 10));
   if (category) overdueQuery = overdueQuery.eq("category", category);
 
   const [{ data: terminalRows }, { data: overdueRowsRaw }] = await Promise.all([
@@ -76,7 +76,7 @@ export default async function SlaReportPage({
     title: string;
     category: string;
     status: string;
-    date_required: string;
+    conclude_date: string;
     owner: { full_name: string } | null;
   }[]).filter((r) => !isTerminal(stages, r.category, r.status));
 
@@ -184,9 +184,9 @@ export default async function SlaReportPage({
                     </td>
                     <td className="px-4 py-2.5 text-slate-600">{CATEGORY_LABELS[r.category as Category] ?? r.category}</td>
                     <td className="px-4 py-2.5 text-slate-600">{r.owner?.full_name ?? "Unassigned"}</td>
-                    <td className="px-4 py-2.5 text-slate-600">{r.date_required}</td>
+                    <td className="px-4 py-2.5 text-slate-600">{r.conclude_date}</td>
                     <td className="px-4 py-2.5 text-red-600 font-medium">
-                      {differenceInCalendarDays(today, parseISO(r.date_required))}
+                      {differenceInCalendarDays(today, parseISO(r.conclude_date))}
                     </td>
                   </tr>
                 ))

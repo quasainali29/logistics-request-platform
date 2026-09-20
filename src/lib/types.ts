@@ -65,6 +65,19 @@ export interface AppSettings {
 
 export type Priority = "low" | "medium" | "high" | "urgent";
 
+// How many days out from "Date required" a request's "Conclude by" date
+// (and, on the New Request form, the category's own schedule date) is
+// auto-suggested at, matching the SLA windows already shown in the
+// Priority dropdown's own labels (Low = 1 week, Medium = 3-4 days,
+// High = 24-48 hours, Urgent = within 24 hours). Upper bound of each
+// range, since that's the latest still-on-time date.
+export const PRIORITY_DUE_OFFSET_DAYS: Record<Priority, number> = {
+  low: 7,
+  medium: 4,
+  high: 2,
+  urgent: 1,
+};
+
 export interface Profile {
   id: string;
   full_name: string;
