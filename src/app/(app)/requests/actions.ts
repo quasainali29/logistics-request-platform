@@ -1973,6 +1973,17 @@ export async function reopenForRework(requestId: string) {
     redirect(`/requests/${requestId}?error=${encodeURIComponent(error.message)}`);
   }
 
+  // Reset acceptance so the normal assigned -> dispatched -> on_site ->
+  // completed path re-triggers for this rework cycle. Without this, the
+  // crew's accepted_at from the first cycle is still set, so there's no
+  // Accept button (canAcceptJob requires !accepted_at) and no dispatched
+  // transition either -- the request would otherwise be stuck at
+  // "assigned" with no visible next action for the technician.
+  await supabase
+    .from("request_technicians")
+    .update({ accepted_at: null })
+    .eq("request_id", requestId);
+
   const { data: crew } = await supabase
     .from("request_technicians")
     .select("technician:profiles!request_technicians_technician_id_fkey(email)")
