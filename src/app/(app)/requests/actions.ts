@@ -44,6 +44,26 @@ async function uploadOne(
   return { name: file.name || "file", url: data.publicUrl };
 }
 
+// Shared by technicianCompleteJob and submitVerification -- both collect a
+// canvas signature as a data URL (canvas.toDataURL()) rather than a File,
+// so it needs decoding into one before it can go through uploadOne() and
+// land in the same storage bucket/policy as every other closeout file.
+async function uploadDataUrl(
+  supabase: SupabaseClient,
+  folder: string,
+  dataUrl: string,
+  baseName: string
+): Promise<string | null> {
+  const match = dataUrl.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
+  if (!match) return null;
+  const [, mime, base64] = match;
+  const bytes = Buffer.from(base64, "base64");
+  const ext = mime.split("/")[1] || "png";
+  const file = new File([bytes], `${baseName}.${ext}`, { type: mime });
+  const uploaded = await uploadOne(supabase, folder, file);
+  return uploaded?.url ?? null;
+}
+
 // createRequest's attachments (photos, permits, item reference images) are
 // uploaded directly to Supabase Storage from the browser first (see
 // src/lib/uploadAttachment.ts) — that sidesteps Vercel's Server Action
@@ -1620,10 +1640,12 @@ export async function technicianCompleteJob(requestId: string, formData: FormDat
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const [{ data: request }, { data: crewRow }] = await Promise.all([
+  const [{ data: request }, { data: crewRow }, { data: technicianProfile }] = await Promise.all([
     supabase
       .from("requests")
-      .select("status, request_number, title, category, owner:profiles!requests_owner_id_fkey(full_name, email)")
+      .select(
+        "status, request_number, title, category, requestor:profiles!requests_requestor_id_fkey(full_name, email)"
+      )
       .eq("id", requestId)
       .single(),
     supabase
@@ -1632,6 +1654,7 @@ export async function technicianCompleteJob(requestId: string, formData: FormDat
       .eq("request_id", requestId)
       .eq("technician_id", user.id)
       .maybeSingle(),
+    supabase.from("profiles").select("full_name").eq("id", user.id).single(),
   ]);
 
   if (!request) {
@@ -1646,37 +1669,26 @@ export async function technicianCompleteJob(requestId: string, formData: FormDat
     );
   }
 
-  const notes = (formData.get("notes") as string) || null;
-  const signedByName = (formData.get("signed_by_name") as string) || null;
-  const signedByRole = (formData.get("signed_by_role") as string) || null;
   const signatureDataUrl = (formData.get("signature") as string) || "";
   // Photos arrive as an already-uploaded {name, url} array (see
   // CompleteJobForm.tsx) -- raw File objects used to be sent straight
   // through this Server Action, which silently failed once real
-  // camera photos pushed the request past the body-size limit.
+  // camera photos were attached: it blew past the Server Action body-size
+  // limit with no error shown to the user.
   const photos = parseAttachmentArray(formData, "photos_json");
 
-  if (!signatureDataUrl || !signedByName || !signedByRole) {
+  if (!signatureDataUrl) {
     redirect(
-      `/requests/${requestId}/complete?error=${encodeURIComponent(
-        "A signature, signer name, and signer role are all required."
-      )}`
+      `/requests/${requestId}/complete?error=${encodeURIComponent("A signature is required.")}`
     );
   }
 
-  // The signature arrives as a data URL (canvas.toDataURL()) rather than a
-  // File -- decode it into one so it goes through the same uploadOne()
-  // path (and the same storage bucket/policy) as every other closeout file.
-  let signatureUrl: string | null = null;
-  const match = signatureDataUrl.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
-  if (match) {
-    const [, mime, base64] = match;
-    const bytes = Buffer.from(base64, "base64");
-    const ext = mime.split("/")[1] || "png";
-    const signatureFile = new File([bytes], `signature.${ext}`, { type: mime });
-    const uploaded = await uploadOne(supabase, `closeout/${requestId}`, signatureFile);
-    signatureUrl = uploaded?.url ?? null;
-  }
+  const signatureUrl = await uploadDataUrl(
+    supabase,
+    `closeout/${requestId}`,
+    signatureDataUrl,
+    "signature"
+  );
 
   if (!signatureUrl) {
     redirect(
@@ -1685,6 +1697,12 @@ export async function technicianCompleteJob(requestId: string, formData: FormDat
       )}`
     );
   }
+
+  // The technician always signs on their own behalf now (see migration
+  // 028) -- no more picking "requestor"/"site supervisor"/"other" as who's
+  // signing, since the requester gets their own separate sign-off right
+  // after this via the verification step.
+  const signedByName = technicianProfile?.full_name ?? "Technician";
 
   // Written BEFORE the status flip below, and its error checked explicitly --
   // if this silently failed (e.g. an RLS gap) the request would otherwise
@@ -1696,10 +1714,10 @@ export async function technicianCompleteJob(requestId: string, formData: FormDat
     {
       request_id: requestId,
       technician_photos: photos,
-      technician_notes: notes,
+      technician_notes: null,
       signature_url: signatureUrl,
       signed_by_name: signedByName,
-      signed_by_role: signedByRole,
+      signed_by_role: "technician",
       signed_at: new Date().toISOString(),
       submitted_by_technician_id: user.id,
     },
@@ -1727,18 +1745,21 @@ export async function technicianCompleteJob(requestId: string, formData: FormDat
     );
   }
 
-  const owner = request.owner as unknown as { full_name: string; email: string } | null;
-  if (owner?.email) {
+  // The requester reviews the work next (see submitVerification below) --
+  // the coordinator hears about it only once that review lands, either as
+  // "ready to close" or "not satisfactory, needs reassignment."
+  const requestor = request.requestor as unknown as { full_name: string; email: string } | null;
+  if (requestor?.email) {
     await sendNotificationEmail({
-      to: owner.email,
+      to: requestor.email,
       subject: `${request.request_number} is ready for your review`,
       html: buildRequestEmailHtml({
         requestNumber: request.request_number,
         title: request.title,
         category: request.category,
-        headline: `${request.request_number} has been marked completed by the technician`,
-        ctaLabel: "Review and close",
-        ctaUrl: `${APP_URL}/requests/${requestId}`,
+        headline: `${request.request_number} has been marked completed by the technician -- please verify the work`,
+        ctaLabel: "Verify completion",
+        ctaUrl: `${APP_URL}/requests/${requestId}/verify`,
       }),
     });
   }
@@ -1747,6 +1768,240 @@ export async function technicianCompleteJob(requestId: string, formData: FormDat
   revalidatePath("/requests");
   revalidatePath("/dashboard");
   redirect(`/requests/${requestId}`);
+}
+
+// The requester's own review of a technician's completed work (see
+// migration 028). Two outcomes: "satisfactory" (photo + signature) hands
+// the request to the coordinator to close; "not_satisfactory" (a required
+// comment on what's pending, plus an optional photo) routes it back to
+// the coordinator to review and reassign the technician. Deliberately
+// does not change requests.status -- it stays "completed" throughout this
+// review window; request detail page.tsx derives which of the three UI
+// states (pending / verified / not satisfactory) applies from the latest
+// row here, compared against request_closeouts.signed_at.
+export async function submitVerification(requestId: string, formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { data: request } = await supabase
+    .from("requests")
+    .select(
+      "status, requestor_id, request_number, title, category, owner:profiles!requests_owner_id_fkey(full_name, email)"
+    )
+    .eq("id", requestId)
+    .single();
+
+  if (!request) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent("Request not found.")}`);
+  }
+
+  if (request.requestor_id !== user.id) {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "Only the requester can verify this work."
+      )}`
+    );
+  }
+
+  if (request.status !== "completed") {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "This request isn't ready for verification."
+      )}`
+    );
+  }
+
+  const decision = formData.get("decision") as string;
+  if (decision !== "satisfactory" && decision !== "not_satisfactory") {
+    redirect(
+      `/requests/${requestId}/verify?error=${encodeURIComponent(
+        "Choose whether the work looks good or needs more work first."
+      )}`
+    );
+  }
+
+  const comment = ((formData.get("comment") as string) || "").trim() || null;
+  if (decision === "not_satisfactory" && !comment) {
+    redirect(
+      `/requests/${requestId}/verify?error=${encodeURIComponent(
+        "Describe what's pending or needs to be redone."
+      )}`
+    );
+  }
+
+  const photos = parseAttachmentArray(formData, "photo_json");
+  const photoUrl = photos[0]?.url ?? null;
+
+  let signatureUrl: string | null = null;
+  if (decision === "satisfactory") {
+    const signatureDataUrl = (formData.get("signature") as string) || "";
+    if (!signatureDataUrl) {
+      redirect(
+        `/requests/${requestId}/verify?error=${encodeURIComponent(
+          "A signature is required to confirm the work."
+        )}`
+      );
+    }
+    signatureUrl = await uploadDataUrl(
+      supabase,
+      `verification/${requestId}`,
+      signatureDataUrl,
+      "signature"
+    );
+    if (!signatureUrl) {
+      redirect(
+        `/requests/${requestId}/verify?error=${encodeURIComponent(
+          "The signature couldn't be saved. Please sign again and resubmit."
+        )}`
+      );
+    }
+  }
+
+  const { error: insertError } = await supabase.from("request_verifications").insert({
+    request_id: requestId,
+    decision,
+    comment,
+    photo_url: photoUrl,
+    signature_url: signatureUrl,
+    verified_by: user.id,
+  });
+
+  if (insertError) {
+    redirect(`/requests/${requestId}/verify?error=${encodeURIComponent(insertError.message)}`);
+  }
+
+  const owner = request.owner as unknown as { full_name: string; email: string } | null;
+  if (owner?.email) {
+    const html =
+      decision === "satisfactory"
+        ? buildRequestEmailHtml({
+            requestNumber: request.request_number,
+            title: request.title,
+            category: request.category,
+            headline: `${request.request_number} was verified by the requester -- ready to close`,
+            ctaLabel: "Review and close",
+            ctaUrl: `${APP_URL}/requests/${requestId}`,
+          })
+        : buildRequestEmailHtml({
+            requestNumber: request.request_number,
+            title: request.title,
+            category: request.category,
+            headline: `${request.request_number} was marked not satisfactory by the requester`,
+            reason: comment,
+            ctaLabel: "Review and reassign",
+            ctaUrl: `${APP_URL}/requests/${requestId}`,
+          });
+    await sendNotificationEmail({
+      to: owner.email,
+      subject:
+        decision === "satisfactory"
+          ? `${request.request_number} is ready to close`
+          : `${request.request_number} needs another look`,
+      html,
+    });
+  }
+
+  revalidatePath(`/requests/${requestId}`);
+  revalidatePath("/requests");
+  revalidatePath("/dashboard");
+  redirect(`/requests/${requestId}`);
+}
+
+// Coordinator/manager action once a requester has marked a job "not
+// satisfactory" -- sends the job back for rework. Resets status to
+// "assigned" (an existing, already-valid stage for every category, see
+// Gotchas in the rebuild guide on why no new workflow_stages row is
+// introduced here) so the coordinator can dispatch again through the
+// normal assigned -> dispatched -> on_site -> completed path, and the
+// technician's /complete page (gated on status === "on_site") becomes
+// reachable again once they're back on site. Doesn't touch the crew list
+// itself -- the coordinator uses the existing Manage Technicians control
+// separately if the job needs a different technician.
+export async function reopenForRework(requestId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const isManager = await currentUserIsManager(supabase, user.id);
+  const { data: actor } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+  if (!isManager && actor?.role !== "logistics_coordinator") {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "Only a coordinator or manager can reassign this job."
+      )}`
+    );
+  }
+
+  const [{ data: request }, { data: latestVerification }] = await Promise.all([
+    supabase.from("requests").select("status, request_number, title, category").eq("id", requestId).single(),
+    supabase
+      .from("request_verifications")
+      .select("decision")
+      .eq("request_id", requestId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  if (!request || request.status !== "completed") {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "This request isn't in a state that can be reopened."
+      )}`
+    );
+  }
+
+  if (latestVerification?.decision !== "not_satisfactory") {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "This request hasn't been marked not satisfactory."
+      )}`
+    );
+  }
+
+  const { error } = await supabase.from("requests").update({ status: "assigned" }).eq("id", requestId);
+  if (error) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  const { data: crew } = await supabase
+    .from("request_technicians")
+    .select("technician:profiles!request_technicians_technician_id_fkey(email)")
+    .eq("request_id", requestId);
+
+  const crewEmails = (crew ?? [])
+    .map((c) => (c.technician as unknown as { email: string } | null)?.email)
+    .filter((e): e is string => !!e);
+
+  await Promise.all(
+    crewEmails.map((email) =>
+      sendNotificationEmail({
+        to: email,
+        subject: `${request.request_number} needs rework`,
+        html: buildRequestEmailHtml({
+          requestNumber: request.request_number,
+          title: request.title,
+          category: request.category,
+          headline: `${request.request_number} was not satisfactory -- the requester's comments are on the request`,
+          ctaLabel: "View request",
+          ctaUrl: `${APP_URL}/requests/${requestId}`,
+        }),
+      })
+    )
+  );
+
+  revalidatePath(`/requests/${requestId}`);
+  revalidatePath("/requests");
+  revalidatePath("/dashboard");
 }
 
 export async function rejectRequest(requestId: string, reason?: string) {

@@ -13,6 +13,7 @@ import {
   acceptJob,
   reassignCoordinator,
   unassignCoordinator,
+  reopenForRework,
 } from "../actions";
 
 export function StatusButton({
@@ -461,6 +462,31 @@ export function ManageTechniciansControl({
 // hasn't accepted yet. Once every crew member has tapped this, the
 // request auto-advances to "Dispatched" (handled server-side in
 // acceptJob/maybeAdvanceToDispatched, not here).
+// Shown to the coordinator/manager on a request the requester just marked
+// "Not Satisfactory" (see migration 028) -- sends the job back for rework
+// by resetting status to "assigned", so the existing Manage Technicians
+// and dispatch controls take over from there.
+export function ReopenForReworkControl({ requestId }: { requestId: string }) {
+  const [pending, startTransition] = useTransition();
+
+  function handleReopen() {
+    startTransition(() => {
+      reopenForRework(requestId);
+    });
+  }
+
+  return (
+    <button
+      type="button"
+      disabled={pending}
+      onClick={handleReopen}
+      className="rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 transition disabled:opacity-50"
+    >
+      {pending ? "Reassigning…" : "Reassign technician"}
+    </button>
+  );
+}
+
 export function AcceptJobControl({ requestId }: { requestId: string }) {
   const [pending, startTransition] = useTransition();
 

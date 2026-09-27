@@ -25,6 +25,7 @@ import {
   type RequestCloseout,
   type LaborCloseoutLine,
   type RequestCostLine,
+  type RequestVerification,
   SIGNED_BY_ROLE_LABELS,
 } from "@/lib/types";
 import { getWorkflowStages } from "@/lib/cachedLookups";
@@ -38,6 +39,7 @@ import {
   AcceptJobControl,
   ReassignCoordinatorControl,
   UnassignCoordinatorControl,
+  ReopenForReworkControl,
 } from "./actions-client";
 import { CloseoutForm } from "./CloseoutForm";
 import { CostBreakdownManager } from "./CostBreakdownManager";
@@ -148,6 +150,7 @@ export default async function RequestDetailPage({
     { data: closeout },
     { data: laborCloseoutLines },
     { data: costLines },
+    { data: latestVerification },
   ] = await Promise.all([
     supabase
       .from("comments")
@@ -173,6 +176,17 @@ export default async function RequestDetailPage({
       .select("*")
       .eq("request_id", id)
       .order("created_at", { ascending: true }),
+    // Only the latest verification attempt matters for the UI -- older
+    // rows from a prior "not satisfactory" cycle stay in the table as
+    // history but aren't queried here. See canonVerification below for how
+    // this is matched up against the current completion cycle.
+    supabase
+      .from("request_verifications")
+      .select("*, verifier:profiles!request_verifications_verified_by_fkey(full_name)")
+      .eq("request_id", id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
 
   // workflow_stages is cached across all categories; narrow to this
@@ -320,6 +334,19 @@ export default async function RequestDetailPage({
 
   const closeoutRow = closeout as RequestCloseout | null;
   const canManageCloseout = profile.is_manager || profile.role === "logistics_coordinator";
+
+  // A verification only counts toward the CURRENT completion cycle if it
+  // was logged at or after the technician's latest signature -- otherwise
+  // it's a stale "not satisfactory" from before a rework loop, and the
+  // request is really back to "pending requester verification" again even
+  // though that older row still exists in the table.
+  const verificationRow = latestVerification as RequestVerification | null;
+  const currentVerification =
+    verificationRow &&
+    (!closeoutRow?.signed_at || verificationRow.created_at >= closeoutRow.signed_at)
+      ? verificationRow
+      : null;
+  const needsVerification = status === "completed" && !currentVerification;
   // Delivery notes and maintenance reports are generated for whoever is
   // actually fulfilling the request, not the original requester —
   // available on any request regardless of status, since it always
@@ -468,6 +495,17 @@ export default async function RequestDetailPage({
             Mark Completed
           </Link>
         )}
+        {isOwner && needsVerification && (
+          <Link
+            href={`/requests/${id}/verify`}
+            className="rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 transition"
+          >
+            Verify completion
+          </Link>
+        )}
+        {canManageCloseout && currentVerification?.decision === "not_satisfactory" && (
+          <ReopenForReworkControl requestId={id} />
+        )}
         {isOwner && status === "returned_for_info" && (
           <Link
             href={`/requests/${id}/edit`}
@@ -562,7 +600,92 @@ export default async function RequestDetailPage({
         </section>
       )}
 
-      {status === "completed" && canManageCloseout && (
+      {needsVerification && (
+        <section className="mb-8 bg-slate-50 border border-slate-200 rounded-xl p-5">
+          <h2 className="text-sm font-semibold text-slate-900 mb-1">
+            Pending requester verification
+          </h2>
+          <p className="text-sm text-slate-500">
+            Waiting on the requester to review the completed work before this can be closed.
+          </p>
+        </section>
+      )}
+
+      {currentVerification?.decision === "satisfactory" && (
+        <section className="mb-8 bg-emerald-50 border border-emerald-200 rounded-xl p-5">
+          <h2 className="text-sm font-semibold text-emerald-800 mb-3">Verified by requester</h2>
+          <div className="grid md:grid-cols-2 gap-7">
+            <div>
+              {currentVerification.signature_url && (
+                <>
+                  <h3 className="text-xs font-semibold text-emerald-700 uppercase mb-1.5">
+                    Signature
+                  </h3>
+                  <div className="border border-emerald-200 rounded-lg p-3 inline-block bg-white mb-2">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={currentVerification.signature_url} alt="Signature" className="h-20" />
+                  </div>
+                </>
+              )}
+              <p className="text-xs text-emerald-700">
+                {currentVerification.verifier?.full_name ?? "Requester"}
+                {` · ${format(parseISO(currentVerification.created_at), "MMM d, yyyy 'at' h:mm a")}`}
+              </p>
+            </div>
+            {currentVerification.photo_url && (
+              <div>
+                <h3 className="text-xs font-semibold text-emerald-700 uppercase mb-1.5">Photo</h3>
+                <a
+                  href={currentVerification.photo_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block w-28 aspect-square rounded-lg overflow-hidden border border-emerald-200"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={currentVerification.photo_url}
+                    alt="Requester's completion photo"
+                    className="w-full h-full object-cover"
+                  />
+                </a>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {currentVerification?.decision === "not_satisfactory" && (
+        <section className="mb-8 bg-red-50 border border-red-200 rounded-xl p-5">
+          <h2 className="text-sm font-semibold text-red-800 mb-3">
+            Not satisfactory — {currentVerification.verifier?.full_name ?? "requester"}
+          </h2>
+          {currentVerification.comment && (
+            <p className="text-sm text-red-900 whitespace-pre-wrap mb-3">
+              {currentVerification.comment}
+            </p>
+          )}
+          {currentVerification.photo_url && (
+            <a
+              href={currentVerification.photo_url}
+              target="_blank"
+              rel="noreferrer"
+              className="block w-28 aspect-square rounded-lg overflow-hidden border border-red-200 mb-2"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={currentVerification.photo_url}
+                alt="Photo of the issue"
+                className="w-full h-full object-cover"
+              />
+            </a>
+          )}
+          <p className="text-xs text-red-700">
+            {format(parseISO(currentVerification.created_at), "MMM d, yyyy 'at' h:mm a")}
+          </p>
+        </section>
+      )}
+
+      {status === "completed" && currentVerification?.decision === "satisfactory" && canManageCloseout && (
         <div className="mb-8">
           <CloseoutForm
             requestId={id}

@@ -159,7 +159,35 @@ export const SIGNED_BY_ROLE_LABELS: Record<string, string> = {
   requestor: "Requestor",
   site_supervisor: "Site Supervisor",
   other: "Other",
+  // The technician signs on their own behalf now (see migration 028) --
+  // the old requestor/site_supervisor/other choice was for whoever was on
+  // site to sign, which the new requester-verification step makes
+  // redundant: the requester gets their own separate sign-off afterward.
+  technician: "Technician",
 };
+
+// A verification is the requester's own review of the technician's
+// completed work (see migration 028) -- "satisfactory" hands the request
+// to the coordinator to close, "not_satisfactory" sends it back for the
+// coordinator to review and reassign.
+export type VerificationDecision = "satisfactory" | "not_satisfactory";
+
+export const VERIFICATION_DECISION_LABELS: Record<VerificationDecision, string> = {
+  satisfactory: "Verified",
+  not_satisfactory: "Not satisfactory",
+};
+
+export interface RequestVerification {
+  id: string;
+  request_id: string;
+  decision: VerificationDecision;
+  comment: string | null;
+  photo_url: string | null;
+  signature_url: string | null;
+  verified_by: string;
+  created_at: string;
+  verifier?: { full_name: string };
+}
 
 export interface AttachmentFile {
   name: string;

@@ -15,20 +15,11 @@ function isNextRedirectError(err: unknown): boolean {
   );
 }
 
-const SIGNER_ROLES: { value: string; label: string }[] = [
-  { value: "site_supervisor", label: "Site Supervisor" },
-  { value: "requestor", label: "Requestor" },
-  { value: "other", label: "Other" },
-];
-
 export function CompleteJobForm({ requestId }: { requestId: string }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [photos, setPhotos] = useState<File[]>([]);
   const [compressing, setCompressing] = useState(false);
-  const [notes, setNotes] = useState("");
-  const [signedByName, setSignedByName] = useState("");
-  const [signedByRole, setSignedByRole] = useState("site_supervisor");
   const [hasSignature, setHasSignature] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -102,7 +93,7 @@ export function CompleteJobForm({ requestId }: { requestId: string }) {
     setPhotos((prev) => prev.filter((_, i) => i !== index));
   }
 
-  const canSubmit = hasSignature && signedByName.trim().length > 0 && !submitting && !compressing;
+  const canSubmit = hasSignature && !submitting && !compressing;
 
   async function handleSubmit() {
     if (!canSubmit) return;
@@ -122,9 +113,6 @@ export function CompleteJobForm({ requestId }: { requestId: string }) {
 
       const formData = new FormData();
       formData.append("photos_json", JSON.stringify(uploaded));
-      formData.append("notes", notes);
-      formData.append("signed_by_name", signedByName.trim());
-      formData.append("signed_by_role", signedByRole);
       formData.append("signature", canvas.toDataURL("image/png"));
 
       await technicianCompleteJob(requestId, formData);
@@ -178,18 +166,6 @@ export function CompleteJobForm({ requestId }: { requestId: string }) {
         </p>
       </section>
 
-      {/* Notes */}
-      <section className="bg-white border border-slate-200 rounded-xl p-4">
-        <h2 className="text-sm font-semibold text-slate-900 mb-3">Work notes</h2>
-        <textarea
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          rows={3}
-          placeholder="What did you do to complete this job?"
-          className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-        />
-      </section>
-
       {/* Signature */}
       <section className="bg-white border border-slate-200 rounded-xl p-4">
         <div className="flex items-center justify-between mb-3">
@@ -214,36 +190,8 @@ export function CompleteJobForm({ requestId }: { requestId: string }) {
           style={{ height: 140 }}
         />
         <p className="text-xs text-slate-400 mt-2">
-          Have the requestor or site supervisor sign above with their finger or a stylus.
+          Sign above with your finger or a stylus to confirm you completed this job.
         </p>
-      </section>
-
-      {/* Signed by */}
-      <section className="bg-white border border-slate-200 rounded-xl p-4">
-        <label className="block text-xs font-semibold text-slate-700 mb-1.5">Signed by</label>
-        <input
-          type="text"
-          value={signedByName}
-          onChange={(e) => setSignedByName(e.target.value)}
-          placeholder="Full name"
-          className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-        />
-        <div className="flex gap-2">
-          {SIGNER_ROLES.map((r) => (
-            <button
-              key={r.value}
-              type="button"
-              onClick={() => setSignedByRole(r.value)}
-              className={`flex-1 text-center rounded-md py-2 text-xs font-medium transition ${
-                signedByRole === r.value
-                  ? "bg-[var(--accent)] text-white"
-                  : "bg-white border border-slate-300 text-slate-600 hover:bg-slate-50"
-              }`}
-            >
-              {r.label}
-            </button>
-          ))}
-        </div>
       </section>
 
       {submitError && (
@@ -261,7 +209,7 @@ export function CompleteJobForm({ requestId }: { requestId: string }) {
         {submitting ? "Submitting…" : "Submit & Complete Job"}
       </button>
       <p className="text-center text-xs text-slate-400">
-        This marks the request Completed and notifies the coordinator.
+        This notifies the requester to review your work before it's closed out.
       </p>
     </div>
   );
