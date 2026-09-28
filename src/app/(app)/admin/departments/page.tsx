@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { format, parseISO } from "date-fns";
 import type { Department } from "@/lib/types";
 import { createDepartment } from "./actions";
-import { DeleteDepartmentButton } from "./actions-client";
+import { DeleteDepartmentButton, DepartmentManagersEditor } from "./actions-client";
 import { AdminNav } from "../AdminNav";
 
 export default async function DepartmentsPage({
@@ -24,13 +24,34 @@ export default async function DepartmentsPage({
   // Soft-deleted departments are left out of this list entirely -- there's
   // no restore action, so once deleted they only live on as whatever
   // plain-text value already-submitted requests stored.
-  const { data: departments } = await supabase
-    .from("departments")
-    .select("*")
-    .is("deleted_at", null)
-    .order("created_at", { ascending: true });
+  const [{ data: departments }, { data: managerProfiles }, { data: assignments }] =
+    await Promise.all([
+      supabase
+        .from("departments")
+        .select("*")
+        .is("deleted_at", null)
+        .order("created_at", { ascending: true }),
+      // is_manager lives on the roles table, not profiles directly (see
+      // getProfile()/lib/auth.ts), so this embeds it and filters in JS
+      // below. logistics_manager is excluded -- that role already sees
+      // every request regardless of department, so assigning it here
+      // would be a no-op (see lib/departmentScope.ts's
+      // SEES_ALL_MANAGER_ROLES).
+      supabase
+        .from("profiles")
+        .select("id, full_name, role, role_info:roles!profiles_role_fkey(is_manager)")
+        .order("full_name"),
+      supabase.from("department_managers").select("department_id, manager_id"),
+    ]);
 
   const departmentList = (departments ?? []) as Department[];
+  const managerList = ((managerProfiles ?? []) as any[])
+    .filter(
+      (p) => (p.role_info as { is_manager: boolean } | null)?.is_manager && p.role !== "logistics_manager"
+    )
+    .map((p) => ({ id: p.id as string, full_name: p.full_name as string }));
+  const assignmentList = (assignments ?? []) as { department_id: string; manager_id: string }[];
+  const managersById = new Map(managerList.map((m) => [m.id, m]));
 
   return (
     <div className="p-8 max-w-5xl">
@@ -62,6 +83,7 @@ export default async function DepartmentsPage({
               <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
                 <tr>
                   <th className="text-left px-4 py-2 font-medium">Name</th>
+                  <th className="text-left px-4 py-2 font-medium">Managers</th>
                   <th className="text-left px-4 py-2 font-medium">Added</th>
                   <th className="px-4 py-2"></th>
                 </tr>
@@ -69,22 +91,37 @@ export default async function DepartmentsPage({
               <tbody className="divide-y divide-slate-100">
                 {departmentList.length === 0 ? (
                   <tr>
-                    <td colSpan={3} className="px-4 py-6 text-center text-slate-400">
+                    <td colSpan={4} className="px-4 py-6 text-center text-slate-400">
                       No departments yet -- add one below.
                     </td>
                   </tr>
                 ) : (
-                  departmentList.map((d) => (
-                    <tr key={d.id}>
-                      <td className="px-4 py-2.5 text-slate-900 font-medium">{d.name}</td>
-                      <td className="px-4 py-2.5 text-slate-500 text-xs">
-                        {format(parseISO(d.created_at), "MMM d, yyyy")}
-                      </td>
-                      <td className="px-4 py-2.5 text-right">
-                        <DeleteDepartmentButton departmentId={d.id} departmentName={d.name} />
-                      </td>
-                    </tr>
-                  ))
+                  departmentList.map((d) => {
+                    const assignedIds = assignmentList
+                      .filter((a) => a.department_id === d.id)
+                      .map((a) => a.manager_id);
+                    const assignedManagers = assignedIds
+                      .map((id) => managersById.get(id))
+                      .filter((m): m is { id: string; full_name: string } => !!m);
+                    return (
+                      <tr key={d.id}>
+                        <td className="px-4 py-2.5 text-slate-900 font-medium">{d.name}</td>
+                        <td className="px-4 py-2.5">
+                          <DepartmentManagersEditor
+                            departmentId={d.id}
+                            assignedManagers={assignedManagers}
+                            assignableManagers={managerList}
+                          />
+                        </td>
+                        <td className="px-4 py-2.5 text-slate-500 text-xs">
+                          {format(parseISO(d.created_at), "MMM d, yyyy")}
+                        </td>
+                        <td className="px-4 py-2.5 text-right">
+                          <DeleteDepartmentButton departmentId={d.id} departmentName={d.name} />
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

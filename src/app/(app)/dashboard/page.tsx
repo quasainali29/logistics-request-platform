@@ -9,6 +9,7 @@ import {
   type WorkflowStage,
 } from "@/lib/types";
 import { getWorkflowStages } from "@/lib/cachedLookups";
+import { getManagerDepartmentScope, NO_DEPARTMENT_MATCH } from "@/lib/departmentScope";
 import Link from "next/link";
 import {
   format,
@@ -602,11 +603,22 @@ export default async function DashboardPage({
   let query = supabase
     .from("requests")
     .select(
-      "id, request_number, title, category, status, priority, conclude_date, updated_at, owner_id, requestor_id, created_at"
+      "id, request_number, title, category, status, priority, conclude_date, updated_at, owner_id, requestor_id, created_at, department"
     );
 
   if (!isStaff) {
     query = query.eq("requestor_id", profile.id);
+  } else {
+    // Department-scoped manager (any is_manager role other than
+    // logistics_manager/main_admin) -- same restriction as the Requests
+    // list, see lib/departmentScope.ts.
+    const managerDepartmentScope = await getManagerDepartmentScope(supabase, profile);
+    if (managerDepartmentScope !== null) {
+      query = query.in(
+        "department",
+        managerDepartmentScope.length ? managerDepartmentScope : NO_DEPARTMENT_MATCH
+      );
+    }
   }
 
   const [{ data: requests }, stageList] = await Promise.all([

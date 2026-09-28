@@ -202,6 +202,21 @@ export async function createRequest(formData: FormData) {
     }
   }
 
+  // Department is auto-filled from the requestor's own profile whenever
+  // they have one set (see Admin > Users) -- keeps request.department
+  // reliably matching the requestor's department, which is what
+  // department-scoped managers filter by (see lib/departmentScope.ts).
+  // Falls back to the form's manual dropdown selection for anyone whose
+  // profile department hasn't been set yet, so existing behavior for
+  // not-yet-migrated users is unchanged.
+  const { data: requestorProfile } = await supabase
+    .from("profiles")
+    .select("department")
+    .eq("id", user.id)
+    .single();
+  const resolvedDepartment =
+    requestorProfile?.department || (formData.get("department") as string) || null;
+
   const { data: request, error } = await supabase
     .from("requests")
     .insert({
@@ -210,7 +225,7 @@ export async function createRequest(formData: FormData) {
       requestor_id: user.id,
       project_id: projectId,
       project: projectText,
-      department: (formData.get("department") as string) || null,
+      department: resolvedDepartment,
       priority: (formData.get("priority") as string) || "medium",
       date_required: (formData.get("date_required") as string) || null,
       conclude_date: (formData.get("conclude_date") as string) || null,

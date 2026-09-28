@@ -40,6 +40,43 @@ export async function createDepartment(formData: FormData) {
   updateTag("departments");
 }
 
+// Assigns a manager to a department -- department-scoped managers (any
+// is_manager role other than logistics_manager, see
+// lib/departmentScope.ts) only see requests whose department matches one
+// of their assignments here. A manager can be assigned to more than one
+// department; a department can have more than one manager.
+export async function assignDepartmentManager(departmentId: string, managerId: string) {
+  await requirePermission("manage_departments");
+
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from("department_managers")
+    .insert({ department_id: departmentId, manager_id: managerId });
+
+  if (error) {
+    redirect(`/admin/departments?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath("/admin/departments");
+}
+
+export async function removeDepartmentManager(departmentId: string, managerId: string) {
+  await requirePermission("manage_departments");
+
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from("department_managers")
+    .delete()
+    .eq("department_id", departmentId)
+    .eq("manager_id", managerId);
+
+  if (error) {
+    redirect(`/admin/departments?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath("/admin/departments");
+}
+
 // Soft delete only. Requests that already have this department's name
 // stored as plain text are untouched -- this only removes it from the
 // dropdown for new requests going forward.

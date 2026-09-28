@@ -5,6 +5,7 @@ import Link from "next/link";
 import RequestsTable from "./RequestsTable";
 import RequestsFilterBar from "./RequestsFilterBar";
 import { computeCompletedVerificationBuckets } from "@/lib/requestVerificationStatus";
+import { getManagerDepartmentScope, NO_DEPARTMENT_MATCH } from "@/lib/departmentScope";
 
 const PAGE_SIZE = 25;
 
@@ -85,6 +86,13 @@ export default async function RequestsPage({
   const technicianFilterId = isTechnician ? profile.id : isStaff ? technicianId : "";
   const filterByTechnician = !!technicianFilterId;
 
+  // A department-scoped manager (any is_manager role other than
+  // logistics_manager/main_admin -- see lib/departmentScope.ts) only
+  // sees requests whose department matches one they've been assigned via
+  // Admin > Departments. null means "no restriction" (plain requestor,
+  // coordinator, technician, warehouse_team, or a sees-all manager role).
+  const managerDepartmentScope = await getManagerDepartmentScope(supabase, profile);
+
   // Non-staff only ever see their own requests -- same restriction the
   // page always enforced, just applied consistently alongside the new
   // filters below. Duplicated across the two branches below (rather than
@@ -127,6 +135,11 @@ export default async function RequestsPage({
       if (!isTechnician) idQuery = idQuery.eq("requestor_id", profile.id);
     } else if (isCoordinator) {
       idQuery = idQuery.eq("owner_id", profile.id);
+    } else if (managerDepartmentScope !== null) {
+      idQuery = idQuery.in(
+        "department",
+        managerDepartmentScope.length ? managerDepartmentScope : NO_DEPARTMENT_MATCH
+      );
     }
     if (filterByTechnician) idQuery = idQuery.eq("request_technicians.technician_id", technicianFilterId);
     idQuery = idQuery.eq("status", "completed");
@@ -166,6 +179,11 @@ export default async function RequestsPage({
       // in the app -- same scoping as their dashboard, not just the
       // requestor_id fallback non-staff roles get.
       query = query.eq("owner_id", profile.id);
+    } else if (managerDepartmentScope !== null) {
+      query = query.in(
+        "department",
+        managerDepartmentScope.length ? managerDepartmentScope : NO_DEPARTMENT_MATCH
+      );
     }
     if (filterByTechnician) query = query.eq("request_technicians.technician_id", technicianFilterId);
     if (category) query = query.eq("category", category);
@@ -212,6 +230,11 @@ export default async function RequestsPage({
       // in the app -- same scoping as their dashboard, not just the
       // requestor_id fallback non-staff roles get.
       query = query.eq("owner_id", profile.id);
+    } else if (managerDepartmentScope !== null) {
+      query = query.in(
+        "department",
+        managerDepartmentScope.length ? managerDepartmentScope : NO_DEPARTMENT_MATCH
+      );
     }
     if (filterByTechnician) query = query.eq("request_technicians.technician_id", technicianFilterId);
     if (category) query = query.eq("category", category);

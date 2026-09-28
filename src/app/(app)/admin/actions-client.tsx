@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import {
   assignUserRole,
+  assignUserDepartment,
   decideRoleRequest,
   deleteRole,
   updateRole,
@@ -15,6 +16,44 @@ import {
 } from "./actions";
 import type { RoleRow } from "@/lib/types";
 import { PROTECTED_ROLE_KEYS } from "@/lib/roleConstants";
+
+// Sets which department a user belongs to -- separate from department
+// SCOPING for managers (which departments a manager can see requests
+// from, see Admin > Departments' manager assignment), this is just "what
+// department is this person in", used to auto-fill a requestor's own
+// submitted requests (see requests/actions.ts) and to know which
+// department a manager's scope refers to if they're later also assigned
+// there. Mirrors RoleAssignSelect's instant-save-on-change pattern.
+export function DepartmentAssignSelect({
+  userId,
+  currentDepartment,
+  departmentOptions,
+}: {
+  userId: string;
+  currentDepartment: string | null;
+  departmentOptions: { id: string; name: string }[];
+}) {
+  const [pending, startTransition] = useTransition();
+
+  return (
+    <select
+      defaultValue={currentDepartment ?? ""}
+      disabled={pending}
+      onChange={(e) => startTransition(() => assignUserDepartment(userId, e.target.value))}
+      className="text-sm border border-slate-300 rounded-md px-2 py-1.5 bg-white disabled:opacity-50"
+    >
+      <option value="">Unassigned</option>
+      {departmentOptions.map((d) => (
+        <option key={d.id} value={d.name}>
+          {d.name}
+        </option>
+      ))}
+      {currentDepartment && !departmentOptions.some((d) => d.name === currentDepartment) && (
+        <option value={currentDepartment}>{currentDepartment} (unavailable)</option>
+      )}
+    </select>
+  );
+}
 
 export function RoleAssignSelect({
   userId,

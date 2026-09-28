@@ -7,11 +7,13 @@ import type { Profile, RoleRow, RoleRequestRow } from "@/lib/types";
 import { createRole, inviteUser, createUserDirectly } from "./actions";
 import {
   RoleAssignSelect,
+  DepartmentAssignSelect,
   RoleTableRow,
   RoleRequestDecisionButtons,
   UserRowActions,
 } from "./actions-client";
 import { AdminNav } from "./AdminNav";
+import { getActiveDepartments } from "@/lib/cachedLookups";
 
 export default async function AdminPage({
   searchParams,
@@ -24,15 +26,17 @@ export default async function AdminPage({
   const { error } = await searchParams;
   const supabase = await createClient();
 
-  const [{ data: roles }, { data: users }, { data: pendingRequests }] = await Promise.all([
-    supabase.from("roles").select("*").order("created_at", { ascending: true }),
-    supabase.from("profiles").select("*").order("full_name", { ascending: true }),
-    supabase
-      .from("role_requests")
-      .select("*, user:profiles!role_requests_user_id_fkey(full_name, email)")
-      .eq("status", "pending")
-      .order("requested_at", { ascending: true }),
-  ]);
+  const [{ data: roles }, { data: users }, { data: pendingRequests }, departmentOptions] =
+    await Promise.all([
+      supabase.from("roles").select("*").order("created_at", { ascending: true }),
+      supabase.from("profiles").select("*").order("full_name", { ascending: true }),
+      supabase
+        .from("role_requests")
+        .select("*, user:profiles!role_requests_user_id_fkey(full_name, email)")
+        .eq("status", "pending")
+        .order("requested_at", { ascending: true }),
+      getActiveDepartments(),
+    ]);
 
   const roleList = (roles ?? []) as RoleRow[];
   const userList = (users ?? []) as Profile[];
@@ -192,6 +196,7 @@ export default async function AdminPage({
                   <th className="text-left px-4 py-2 font-medium">Name</th>
                   <th className="text-left px-4 py-2 font-medium">Email</th>
                   <th className="text-left px-4 py-2 font-medium">Role</th>
+                  <th className="text-left px-4 py-2 font-medium">Department</th>
                   <th className="text-left px-4 py-2 font-medium">Status</th>
                   <th className="text-right px-4 py-2 font-medium">Actions</th>
                 </tr>
@@ -208,6 +213,13 @@ export default async function AdminPage({
                     <td className="px-4 py-2.5 text-slate-600">{u.email}</td>
                     <td className="px-4 py-2.5">
                       <RoleAssignSelect userId={u.id} currentRole={u.role} roles={roleList} />
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <DepartmentAssignSelect
+                        userId={u.id}
+                        currentDepartment={u.department ?? null}
+                        departmentOptions={departmentOptions}
+                      />
                     </td>
                     <td className="px-4 py-2.5">
                       {u.status === "active" ? (

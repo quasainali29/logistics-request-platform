@@ -182,6 +182,28 @@ export async function assignUserRole(userId: string, roleName: string) {
   revalidatePath("/admin");
 }
 
+// A user's department -- used both for their own routing (a plain
+// requestor's own submitted requests inherit this at creation time, see
+// requests/actions.ts) and, if they're later made a manager, has no
+// direct effect itself -- department SCOPING for managers is a separate
+// assignment (see department_managers / Admin > Departments), since one
+// manager can be scoped to several departments while a person only has
+// one department of their own.
+export async function assignUserDepartment(userId: string, department: string) {
+  const { supabase } = await requireManager();
+
+  const { error } = await supabase
+    .from("profiles")
+    .update({ department: department || null })
+    .eq("id", userId);
+
+  if (error) {
+    redirect(`/admin?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath("/admin");
+}
+
 export async function decideRoleRequest(
   requestId: string,
   decision: "approved" | "rejected",
