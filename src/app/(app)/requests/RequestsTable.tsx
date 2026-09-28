@@ -14,6 +14,11 @@ import {
   type WorkflowStage,
   type RequestRow,
 } from "@/lib/types";
+import {
+  VERIFICATION_BUCKET_LABELS,
+  VERIFICATION_BUCKET_COLORS,
+  type CompletedVerificationBucket,
+} from "@/lib/requestVerificationStatus";
 
 // "Azhar" for one, "Azhar, Shahoalom" for two, "Azhar +2" for three or
 // more -- keeps the column readable regardless of crew size.
@@ -25,16 +30,50 @@ function crewLabel(crew: RequestRow["request_technicians"]) {
 }
 import { deleteRequests } from "./actions";
 
+// Overrides for the three statuses this list displays differently than
+// the raw workflow_stages label/color -- see requests/page.tsx's
+// statusOptions comment for why. "dispatched"/"on_site" collapse into one
+// "Work in process" badge (purely cosmetic, the real status column value
+// is untouched); "submitted" reads as "Unassigned"; "completed" is
+// replaced by whichever of the three verificationBuckets sub-states this
+// row is currently in (falls back to the plain "Completed" label if the
+// bucket lookup somehow has nothing for this id, e.g. a race between page
+// render and computeCompletedVerificationBuckets).
+function displayStatus(
+  r: RequestRow,
+  stageList: WorkflowStage[],
+  verificationBuckets: Record<string, CompletedVerificationBucket>
+): { label: string; color: string } {
+  if (r.status === "dispatched" || r.status === "on_site") {
+    return { label: "Work in process", color: "bg-purple-100 text-purple-800" };
+  }
+  if (r.status === "completed") {
+    const bucket = verificationBuckets[r.id];
+    if (bucket) {
+      return { label: VERIFICATION_BUCKET_LABELS[bucket], color: VERIFICATION_BUCKET_COLORS[bucket] };
+    }
+  }
+  if (r.status === "submitted") {
+    return { label: "Unassigned", color: statusColor(r.category, r.status, stageList) };
+  }
+  return {
+    label: formatStatusLabel(r.category, r.status, stageList),
+    color: statusColor(r.category, r.status, stageList),
+  };
+}
+
 export default function RequestsTable({
   requests,
   stageList,
   isStaff,
   isManager,
+  verificationBuckets,
 }: {
   requests: RequestRow[];
   stageList: WorkflowStage[];
   isStaff: boolean;
   isManager: boolean;
+  verificationBuckets: Record<string, CompletedVerificationBucket>;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [pending, startTransition] = useTransition();
@@ -159,7 +198,9 @@ export default function RequestsTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {requests.map((r) => (
+            {requests.map((r) => {
+              const status = displayStatus(r, stageList, verificationBuckets);
+              return (
               <tr
                 key={r.id}
                 className={`hover:bg-slate-50 ${isOverdue(r) ? "bg-red-50" : ""}`}
@@ -202,14 +243,8 @@ export default function RequestsTable({
                   </span>
                 </td>
                 <td className="px-4 py-3">
-                  <span
-                    className={`text-xs px-2 py-0.5 rounded-full ${statusColor(
-                      r.category,
-                      r.status,
-                      stageList
-                    )}`}
-                  >
-                    {formatStatusLabel(r.category, r.status, stageList)}
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${status.color}`}>
+                    {status.label}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-slate-600">
@@ -255,7 +290,8 @@ export default function RequestsTable({
                   </td>
                 )}
               </tr>
-            ))}
+              );
+            })}
             {requests.length === 0 && (
               <tr>
                 <td colSpan={colCount} className="px-4 py-10 text-center text-slate-400">

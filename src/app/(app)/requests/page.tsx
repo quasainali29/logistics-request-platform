@@ -4,6 +4,7 @@ import { getWorkflowStages, getActiveProjects } from "@/lib/cachedLookups";
 import Link from "next/link";
 import RequestsTable from "./RequestsTable";
 import RequestsFilterBar from "./RequestsFilterBar";
+import { computeCompletedVerificationBuckets } from "@/lib/requestVerificationStatus";
 
 const PAGE_SIZE = 25;
 
@@ -105,6 +106,49 @@ export default async function RequestsPage({
     new Set(stageList.filter((s) => s.is_terminal).map((s) => s.key))
   );
 
+  // Two synthetic filter values ("work_in_process" and the three
+  // completed sub-states) don't map to a single workflow_stages key --
+  // see the statusOptions comment further down. "work_in_process" is
+  // handled with a plain .in(["dispatched","on_site"]) below; the
+  // completed sub-states need a request_verifications/request_closeouts
+  // lookup that a single .eq("status", ...) can't express, so for those
+  // we narrow to a concrete list of request ids up front (mirroring the
+  // priority-sort branch's "fetch everything matching, then filter in
+  // memory" approach below -- fine at this data volume) and filter the
+  // real query by id instead of by status.
+  const COMPLETED_SUBSTATES = new Set(["waiting_verification", "require_recheck", "verified"]);
+  let restrictToIds: string[] | null = null;
+
+  if (COMPLETED_SUBSTATES.has(status)) {
+    let idQuery = supabase
+      .from("requests")
+      .select(filterByTechnician ? "id, request_technicians!inner(technician_id)" : "id");
+    if (!isStaff) {
+      if (!isTechnician) idQuery = idQuery.eq("requestor_id", profile.id);
+    } else if (isCoordinator) {
+      idQuery = idQuery.eq("owner_id", profile.id);
+    }
+    if (filterByTechnician) idQuery = idQuery.eq("request_technicians.technician_id", technicianFilterId);
+    idQuery = idQuery.eq("status", "completed");
+    if (category) idQuery = idQuery.eq("category", category);
+    if (projectId) idQuery = idQuery.eq("project_id", projectId);
+    if (isStaff && requestorId) idQuery = idQuery.eq("requestor_id", requestorId);
+    if (isStaff && coordinatorId) idQuery = idQuery.eq("owner_id", coordinatorId);
+    if (priority) idQuery = idQuery.eq("priority", priority);
+    if (search) idQuery = idQuery.ilike("request_number", `%${search}%`);
+    if (dateFrom) idQuery = idQuery.gte("created_at", `${dateFrom}T00:00:00`);
+    if (dateTo) idQuery = idQuery.lte("created_at", `${dateTo}T23:59:59`);
+    // The Overdue due-date filter always excludes terminal statuses (see
+    // terminalStatusKeys above), and "completed" is terminal, so an
+    // Overdue + completed-substate combination would always be empty
+    // anyway -- skip replicating that filter here.
+
+    const { data: candidateRows } = await idQuery;
+    const candidateIds = ((candidateRows ?? []) as any[]).map((r) => r.id as string);
+    const buckets = await computeCompletedVerificationBuckets(supabase, candidateIds);
+    restrictToIds = candidateIds.filter((id) => buckets.get(id) === status);
+  }
+
   let requests: Array<Record<string, unknown>> = [];
   let total = 0;
 
@@ -129,7 +173,10 @@ export default async function RequestsPage({
     if (isStaff && requestorId) query = query.eq("requestor_id", requestorId);
     if (isStaff && coordinatorId) query = query.eq("owner_id", coordinatorId);
     if (priority) query = query.eq("priority", priority);
-    if (status) query = query.eq("status", status);
+    if (status === "work_in_process") query = query.in("status", ["dispatched", "on_site"]);
+    else if (restrictToIds !== null) {
+      query = query.in("id", restrictToIds.length ? restrictToIds : ["00000000-0000-0000-0000-000000000000"]);
+    } else if (status) query = query.eq("status", status);
     if (search) query = query.ilike("request_number", `%${search}%`);
     if (dateFrom) query = query.gte("created_at", `${dateFrom}T00:00:00`);
     if (dateTo) query = query.lte("created_at", `${dateTo}T23:59:59`);
@@ -172,7 +219,10 @@ export default async function RequestsPage({
     if (isStaff && requestorId) query = query.eq("requestor_id", requestorId);
     if (isStaff && coordinatorId) query = query.eq("owner_id", coordinatorId);
     if (priority) query = query.eq("priority", priority);
-    if (status) query = query.eq("status", status);
+    if (status === "work_in_process") query = query.in("status", ["dispatched", "on_site"]);
+    else if (restrictToIds !== null) {
+      query = query.in("id", restrictToIds.length ? restrictToIds : ["00000000-0000-0000-0000-000000000000"]);
+    } else if (status) query = query.eq("status", status);
     if (search) query = query.ilike("request_number", `%${search}%`);
     if (dateFrom) query = query.gte("created_at", `${dateFrom}T00:00:00`);
     if (dateTo) query = query.lte("created_at", `${dateTo}T23:59:59`);
@@ -237,8 +287,8 @@ export default async function RequestsPage({
   // configured workflow stages, since the filter applies a plain
   // `status = key` match regardless of which category the request is in.
   //
-  // Two things need normalizing here rather than showing workflow_stages
-  // verbatim:
+  // Several things need normalizing here rather than showing
+  // workflow_stages verbatim:
   //  - "planning", "under_review", and "rejected" are configured stages
   //    that no code path in the app ever actually sets on a request
   //    (the submitted->review step and the standalone "rejected" terminal
@@ -252,17 +302,59 @@ export default async function RequestsPage({
   //    one canonical label rather than whichever category's row happens
   //    to be deduped last -- each category's own request badges keep
   //    their own configured label, this only affects the shared filter.
+  //  - "submitted" displays as "Unassigned" in this filter (and the table
+  //    below) -- same underlying status, just a clearer name for what it
+  //    actually means at this stage.
+  //  - "dispatched" and "on_site" collapse into one synthetic
+  //    "work_in_process" option/value -- see the query building above,
+  //    which expands it back into `status in ('dispatched','on_site')`.
+  //  - "completed" is replaced by three synthetic sub-states --
+  //    "waiting_verification", "require_recheck", "verified" -- derived
+  //    from request_verifications/request_closeouts rather than a
+  //    workflow_stages key (see computeCompletedVerificationBuckets).
   const DEAD_STATUS_KEYS = new Set(["planning", "under_review", "rejected"]);
   const CANONICAL_STATUS_LABELS: Record<string, string> = {
     under_process: "Under Process",
   };
-  const statusOptions = Array.from(
+  const dedupedStages = Array.from(
     new Map(
       stageList
         .filter((s) => !DEAD_STATUS_KEYS.has(s.key))
         .map((s) => [s.key, { value: s.key, label: CANONICAL_STATUS_LABELS[s.key] ?? s.label }])
     ).values()
   );
+  const statusOptions: { value: string; label: string }[] = [];
+  let addedWorkInProcess = false;
+  for (const opt of dedupedStages) {
+    if (opt.value === "dispatched" || opt.value === "on_site") {
+      if (!addedWorkInProcess) {
+        statusOptions.push({ value: "work_in_process", label: "Work in process" });
+        addedWorkInProcess = true;
+      }
+      continue;
+    }
+    if (opt.value === "completed") {
+      statusOptions.push({ value: "waiting_verification", label: "Waiting for verification" });
+      statusOptions.push({ value: "require_recheck", label: "Require recheck" });
+      statusOptions.push({ value: "verified", label: "Verified" });
+      continue;
+    }
+    if (opt.value === "submitted") {
+      statusOptions.push({ value: "submitted", label: "Unassigned" });
+      continue;
+    }
+    statusOptions.push(opt);
+  }
+
+  // Same derivation the filter above uses, but scoped to just the
+  // completed requests on THIS page -- so RequestsTable can show the
+  // right sub-state label/color per row regardless of which status
+  // filter (if any) is active.
+  const completedIdsOnPage = (requests as any[])
+    .filter((r) => r.status === "completed")
+    .map((r) => r.id as string);
+  const verificationBucketsMap = await computeCompletedVerificationBuckets(supabase, completedIdsOnPage);
+  const verificationBuckets = Object.fromEntries(verificationBucketsMap);
 
   function pageHref(p: number) {
     const sp = new URLSearchParams();
@@ -328,6 +420,7 @@ export default async function RequestsPage({
         stageList={stageList}
         isStaff={isStaff}
         isManager={isManager}
+        verificationBuckets={verificationBuckets}
       />
 
       {totalPages > 1 && (
