@@ -1,4 +1,5 @@
 import { getProfile } from "@/lib/auth";
+import { canDo } from "@/lib/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { notFound } from "next/navigation";
 import { format, parseISO } from "date-fns";
@@ -144,12 +145,12 @@ export default async function AmcDetailPage({
           </div>
         </Section>
 
-        {profile.is_staff && (
+        {canDo(profile, "upload_maintenance_report") && (
           <UploadReportForm contractId={c.id} requiresCompliance={requiresCompliance} />
         )}
       </div>
 
-      {profile.is_staff && (
+      {canDo(profile, "create_edit_amc_contract") && (
         <details className="mt-4">
           <summary className="cursor-pointer text-sm text-[var(--accent)] underline w-fit">
             Edit contract details

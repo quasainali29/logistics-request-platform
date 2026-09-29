@@ -1,4 +1,5 @@
 import { getProfile } from "@/lib/auth";
+import { canDo } from "@/lib/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { createAmcContract } from "../actions";
@@ -7,7 +8,7 @@ import { FREQUENCY_PRESETS, frequencyOptionValue } from "@/lib/types";
 
 export default async function NewAmcPage() {
   const profile = await getProfile();
-  if (!profile.is_staff) redirect("/amc");
+  if (!canDo(profile, "create_edit_amc_contract")) redirect("/amc");
 
   const supabase = await createClient();
   const [locationList, typeList, { data: staffProfiles }] = await Promise.all([

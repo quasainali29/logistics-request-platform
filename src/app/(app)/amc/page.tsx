@@ -1,4 +1,5 @@
 import { getProfile } from "@/lib/auth";
+import { canDo } from "@/lib/permissions";
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import {
@@ -24,6 +25,9 @@ export default async function AmcPage() {
   const profile = await getProfile();
   const isStaff = !!profile.is_staff;
   const isManager = !!profile.is_manager;
+  const canCreateEditAmc = canDo(profile, "create_edit_amc_contract");
+  const canAddLocationType = canDo(profile, "add_location_type");
+  const canDeleteLocationType = canDo(profile, "delete_location_type");
   const supabase = await createClient();
 
   const [locationList, typeList, reminderRecipients, reminderRules, { data: contracts }] = await Promise.all([
@@ -62,7 +66,7 @@ export default async function AmcPage() {
             Annual maintenance contracts across every location.
           </p>
         </div>
-        {isStaff && (
+        {canCreateEditAmc && (
           <Link
             href="/amc/new"
             className="bg-[var(--accent)] text-white rounded-md px-4 py-2 text-sm font-medium hover:opacity-90 transition"
@@ -89,7 +93,7 @@ export default async function AmcPage() {
                 className="relative group bg-slate-100 text-slate-700 rounded-md px-3 py-1.5 text-xs"
               >
                 {loc.name}
-                {isManager && (
+                {canDeleteLocationType && (
                   <form
                     action={deleteAmcLocation.bind(null, loc.id)}
                     className="absolute -top-1.5 -right-1.5 opacity-0 group-hover:opacity-100 transition"
@@ -105,7 +109,7 @@ export default async function AmcPage() {
                 )}
               </span>
             ))}
-            {isStaff && (
+            {canAddLocationType && (
               <details className="relative">
                 <summary className="list-none cursor-pointer bg-white border border-dashed border-slate-300 text-slate-500 rounded-md px-3 py-1.5 text-xs hover:border-slate-400">
                   + Add location
@@ -141,7 +145,7 @@ export default async function AmcPage() {
                 className="relative group bg-slate-100 text-slate-700 rounded-md px-3 py-1.5 text-xs"
               >
                 {t.name}
-                {isManager && (
+                {canDeleteLocationType && (
                   <form
                     action={deleteAmcType.bind(null, t.id)}
                     className="absolute -top-1.5 -right-1.5 opacity-0 group-hover:opacity-100 transition"
@@ -157,7 +161,7 @@ export default async function AmcPage() {
                 )}
               </span>
             ))}
-            {isStaff && (
+            {canAddLocationType && (
               <details className="relative">
                 <summary className="list-none cursor-pointer bg-white border border-dashed border-slate-300 text-slate-500 rounded-md px-3 py-1.5 text-xs hover:border-slate-400">
                   + Add AMC type

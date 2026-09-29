@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { revalidatePath, updateTag } from "next/cache";
 import { getProfile } from "@/lib/auth";
+import { canDo } from "@/lib/permissions";
 import type { AttachmentFile } from "@/lib/types";
 import { parseFrequencyOptionValue } from "@/lib/types";
 
@@ -25,8 +26,45 @@ async function requireManager() {
   return profile;
 }
 
+// The four AMC-category permission keys from Admin > Permissions --
+// mirrors the Requests-category wiring (canDo checks the matrix, with
+// logistics_manager/main_admin always allowed regardless of what's
+// checked). These replace the old flat is_staff/is_manager checks above
+// for the specific actions the matrix actually claims to control.
+async function requireCanCreateEditAmcContract() {
+  const profile = await getProfile();
+  if (!canDo(profile, "create_edit_amc_contract")) {
+    throw new Error("You don't have permission to create or edit AMC contracts.");
+  }
+  return profile;
+}
+
+async function requireCanUploadMaintenanceReport() {
+  const profile = await getProfile();
+  if (!canDo(profile, "upload_maintenance_report")) {
+    throw new Error("You don't have permission to upload maintenance reports.");
+  }
+  return profile;
+}
+
+async function requireCanAddLocationType() {
+  const profile = await getProfile();
+  if (!canDo(profile, "add_location_type")) {
+    throw new Error("You don't have permission to add locations or AMC types.");
+  }
+  return profile;
+}
+
+async function requireCanDeleteLocationType() {
+  const profile = await getProfile();
+  if (!canDo(profile, "delete_location_type")) {
+    throw new Error("You don't have permission to delete locations or AMC types.");
+  }
+  return profile;
+}
+
 export async function addAmcLocation(formData: FormData) {
-  const profile = await requireStaff();
+  const profile = await requireCanAddLocationType();
   const name = String(formData.get("name") ?? "").trim();
   if (!name) throw new Error("Location name is required.");
 
@@ -42,7 +80,7 @@ export async function addAmcLocation(formData: FormData) {
 }
 
 export async function addAmcType(formData: FormData) {
-  const profile = await requireStaff();
+  const profile = await requireCanAddLocationType();
   const name = String(formData.get("name") ?? "").trim();
   const requiresCompliance = formData.get("requires_compliance") === "on";
   if (!name) throw new Error("AMC type name is required.");
@@ -59,7 +97,7 @@ export async function addAmcType(formData: FormData) {
 }
 
 export async function deleteAmcLocation(locationId: string) {
-  await requireManager();
+  await requireCanDeleteLocationType();
   const supabase = await createClient();
 
   const { count } = await supabase
@@ -81,7 +119,7 @@ export async function deleteAmcLocation(locationId: string) {
 }
 
 export async function deleteAmcType(typeId: string) {
-  await requireManager();
+  await requireCanDeleteLocationType();
   const supabase = await createClient();
 
   const { count } = await supabase
@@ -154,7 +192,7 @@ export async function toggleReminderRule(ruleId: string, enabled: boolean) {
 }
 
 export async function createAmcContract(formData: FormData) {
-  const profile = await requireStaff();
+  const profile = await requireCanCreateEditAmcContract();
   const supabase = await createClient();
 
   const nextMaintenanceDate = String(formData.get("next_maintenance_date") ?? "");
@@ -197,7 +235,7 @@ export async function createAmcContract(formData: FormData) {
 }
 
 export async function updateAmcContract(contractId: string, formData: FormData) {
-  await requireStaff();
+  await requireCanCreateEditAmcContract();
   const supabase = await createClient();
 
   const { error } = await supabase
@@ -247,7 +285,7 @@ export async function logAmcMaintenanceVisit(
     notes?: string;
   }
 ) {
-  const profile = await requireStaff();
+  const profile = await requireCanUploadMaintenanceReport();
   const supabase = await createClient();
 
   const { error } = await supabase.from("amc_maintenance_records").insert({
