@@ -50,10 +50,14 @@ export function ApproveRejectControls({
   requestId,
   coordinators,
   category,
+  canApprove,
+  canReject,
 }: {
   requestId: string;
   coordinators: { id: string; full_name: string }[];
   category?: string;
+  canApprove: boolean;
+  canReject: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [showAssign, setShowAssign] = useState(false);
@@ -98,30 +102,36 @@ export function ApproveRejectControls({
 
   return (
     <>
-      <button
-        type="button"
-        disabled={pending}
-        onClick={() => setShowAssign(true)}
-        className="rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 transition disabled:opacity-50"
-      >
-        Approve
-      </button>
-      <button
-        type="button"
-        disabled={pending}
-        onClick={handleRejectClick}
-        className="rounded-md px-4 py-2 text-sm font-medium border border-slate-300 text-slate-700 hover:bg-slate-50 transition disabled:opacity-50"
-      >
-        Return for info
-      </button>
-      <button
-        type="button"
-        disabled={pending}
-        onClick={() => setShowRejectClose(true)}
-        className="rounded-md px-4 py-2 text-sm font-medium bg-red-600 text-white hover:opacity-90 transition disabled:opacity-50"
-      >
-        Reject
-      </button>
+      {canApprove && (
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => setShowAssign(true)}
+          className="rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 transition disabled:opacity-50"
+        >
+          Approve
+        </button>
+      )}
+      {canReject && (
+        <button
+          type="button"
+          disabled={pending}
+          onClick={handleRejectClick}
+          className="rounded-md px-4 py-2 text-sm font-medium border border-slate-300 text-slate-700 hover:bg-slate-50 transition disabled:opacity-50"
+        >
+          Return for info
+        </button>
+      )}
+      {canReject && (
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => setShowRejectClose(true)}
+          className="rounded-md px-4 py-2 text-sm font-medium bg-red-600 text-white hover:opacity-90 transition disabled:opacity-50"
+        >
+          Reject
+        </button>
+      )}
 
       {showReject && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">

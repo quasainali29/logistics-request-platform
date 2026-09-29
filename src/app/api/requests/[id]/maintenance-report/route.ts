@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/auth";
+import { canDo } from "@/lib/permissions";
 import {
   buildMaintenanceReportDocx,
   type MaintenancePhoto,
@@ -11,12 +12,8 @@ import { format, parseISO } from "date-fns";
 // Same audience as the delivery note: whoever is actually fulfilling the
 // work (coordinators, warehouse staff, managers), not the original
 // requester. Available on any maintenance request regardless of status.
-function canGenerateMaintenanceReport(profile: { is_manager?: boolean; role: string }) {
-  return (
-    profile.is_manager ||
-    profile.role === "logistics_coordinator" ||
-    profile.role === "warehouse_team"
-  );
+function canGenerateMaintenanceReport(profile: Parameters<typeof canDo>[0]) {
+  return canDo(profile, "generate_documents");
 }
 
 function inferImageType(url: string, contentType: string | null): SupportedImageType {

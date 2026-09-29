@@ -6,6 +6,7 @@ import RequestsTable from "./RequestsTable";
 import RequestsFilterBar from "./RequestsFilterBar";
 import { computeCompletedVerificationBuckets } from "@/lib/requestVerificationStatus";
 import { getManagerDepartmentScope, NO_DEPARTMENT_MATCH } from "@/lib/departmentScope";
+import { canDo } from "@/lib/permissions";
 
 const PAGE_SIZE = 25;
 
@@ -140,6 +141,8 @@ export default async function RequestsPage({
         "department",
         managerDepartmentScope.length ? managerDepartmentScope : NO_DEPARTMENT_MATCH
       );
+    } else if (!canDo(profile, "view_all_requests")) {
+      idQuery = idQuery.eq("requestor_id", profile.id);
     }
     if (filterByTechnician) idQuery = idQuery.eq("request_technicians.technician_id", technicianFilterId);
     idQuery = idQuery.eq("status", "completed");
@@ -184,6 +187,8 @@ export default async function RequestsPage({
         "department",
         managerDepartmentScope.length ? managerDepartmentScope : NO_DEPARTMENT_MATCH
       );
+    } else if (!canDo(profile, "view_all_requests")) {
+      query = query.eq("requestor_id", profile.id);
     }
     if (filterByTechnician) query = query.eq("request_technicians.technician_id", technicianFilterId);
     if (category) query = query.eq("category", category);
@@ -235,6 +240,8 @@ export default async function RequestsPage({
         "department",
         managerDepartmentScope.length ? managerDepartmentScope : NO_DEPARTMENT_MATCH
       );
+    } else if (!canDo(profile, "view_all_requests")) {
+      query = query.eq("requestor_id", profile.id);
     }
     if (filterByTechnician) query = query.eq("request_technicians.technician_id", technicianFilterId);
     if (category) query = query.eq("category", category);
@@ -418,7 +425,7 @@ export default async function RequestsPage({
             )}
           </p>
         </div>
-        {!isTechnician && (
+        {!isTechnician && canDo(profile, "create_request") && (
           <Link
             href="/requests/new"
             className="bg-[var(--accent)] text-white rounded-md px-4 py-2 text-sm font-medium hover:opacity-90 transition"
@@ -443,6 +450,7 @@ export default async function RequestsPage({
         stageList={stageList}
         isStaff={isStaff}
         isManager={isManager}
+        canDelete={canDo(profile, "delete_request")}
         verificationBuckets={verificationBuckets}
       />
 

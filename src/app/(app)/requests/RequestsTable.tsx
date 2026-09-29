@@ -67,12 +67,14 @@ export default function RequestsTable({
   stageList,
   isStaff,
   isManager,
+  canDelete,
   verificationBuckets,
 }: {
   requests: RequestRow[];
   stageList: WorkflowStage[];
   isStaff: boolean;
   isManager: boolean;
+  canDelete: boolean;
   verificationBuckets: Record<string, CompletedVerificationBucket>;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -81,7 +83,7 @@ export default function RequestsTable({
   const allSelected = requests.length > 0 && selected.size === requests.length;
   const someSelected = selected.size > 0 && !allSelected;
 
-  const colCount = 8 + (isStaff ? 1 : 0) + (isManager ? 1 : 0);
+  const colCount = 8 + (isStaff ? 1 : 0) + (canDelete ? 1 : 0);
 
   // Same definition the dashboard's "Overdue" metric uses: due date has
   // passed (not today), and the request hasn't reached a terminal stage
@@ -148,7 +150,7 @@ export default function RequestsTable({
 
   return (
     <div className="space-y-3">
-      {isManager && selected.size > 0 && (
+      {canDelete && selected.size > 0 && (
         <div className="flex items-center justify-between bg-red-50 border border-red-200 rounded-lg px-4 py-2.5">
           <p className="text-sm text-red-700">
             {selected.size} request{selected.size > 1 ? "s" : ""} selected
@@ -171,7 +173,7 @@ export default function RequestsTable({
         <table className="w-full text-sm min-w-[720px]">
           <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
             <tr>
-              {isManager && (
+              {canDelete && (
                 <th className="px-4 py-3 font-medium w-10">
                   <input
                     type="checkbox"
@@ -194,7 +196,7 @@ export default function RequestsTable({
               <th className="text-left px-4 py-3 font-medium">Assigned coordinator</th>
               <th className="text-left px-4 py-3 font-medium">Assigned technician</th>
               <th className="text-left px-4 py-3 font-medium">Due</th>
-              {isManager && <th className="text-left px-4 py-3 font-medium">Actions</th>}
+              {canDelete && <th className="text-left px-4 py-3 font-medium">Actions</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -205,7 +207,7 @@ export default function RequestsTable({
                 key={r.id}
                 className={`hover:bg-slate-50 ${isOverdue(r) ? "bg-red-50" : ""}`}
               >
-                {isManager && (
+                {canDelete && (
                   <td className="px-4 py-3">
                     <input
                       type="checkbox"
@@ -277,7 +279,7 @@ export default function RequestsTable({
                     <span className="text-slate-600">—</span>
                   )}
                 </td>
-                {isManager && (
+                {canDelete && (
                   <td className="px-4 py-3">
                     <button
                       type="button"

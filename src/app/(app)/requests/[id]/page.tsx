@@ -29,7 +29,7 @@ import {
   SIGNED_BY_ROLE_LABELS,
 } from "@/lib/types";
 import { getWorkflowStages } from "@/lib/cachedLookups";
-import { can } from "@/lib/permissions";
+import { can, canDo } from "@/lib/permissions";
 import {
   StatusButton,
   CommentBox,
@@ -199,10 +199,10 @@ export default async function RequestDetailPage({
   // still-active request) -- same options list, two different entry points.
   const currentStageForOwner = stages.find((s) => s.key === request.status);
   const canManageCoordinatorAssignment =
-    !!profile.is_manager && !!request.owner_id && !currentStageForOwner?.is_terminal;
+    canDo(profile, "assign_coordinator") && !!request.owner_id && !currentStageForOwner?.is_terminal;
   let coordinators: { id: string; full_name: string }[] = [];
   if (
-    (profile.is_manager && request.status === "submitted") ||
+    (canDo(profile, "approve_request") && request.status === "submitted") ||
     canManageCoordinatorAssignment
   ) {
     const { data: coords } = await supabase
@@ -333,7 +333,7 @@ export default async function RequestDetailPage({
   });
 
   const closeoutRow = closeout as RequestCloseout | null;
-  const canManageCloseout = profile.is_manager || profile.role === "logistics_coordinator";
+  const canManageCloseout = canDo(profile, "close_out_request");
 
   // A verification only counts toward the CURRENT completion cycle if it
   // was logged at or after the technician's latest signature -- otherwise
@@ -351,10 +351,7 @@ export default async function RequestDetailPage({
   // actually fulfilling the request, not the original requester —
   // available on any request regardless of status, since it always
   // reflects current data.
-  const canGenerateFulfillmentDocs =
-    profile.is_manager ||
-    profile.role === "logistics_coordinator" ||
-    profile.role === "warehouse_team";
+  const canGenerateFulfillmentDocs = canDo(profile, "generate_documents");
 
   // Managers/coordinators can correct an active request's details (e.g.
   // push the due date back) any time it hasn't reached a terminal stage
@@ -363,7 +360,7 @@ export default async function RequestDetailPage({
   // at the same /edit route.
   const currentStage = stageList.find((s) => s.key === status);
   const canManagerEditRequest =
-    (profile.is_manager || profile.role === "logistics_coordinator") &&
+    canDo(profile, "edit_request") &&
     !currentStage?.is_terminal &&
     !(isOwner && status === "returned_for_info");
 
@@ -467,13 +464,16 @@ export default async function RequestDetailPage({
 
       {/* Action bar — driven by the admin-configured workflow for this category */}
       <div className="flex flex-wrap gap-2 mb-8">
-        {status === "submitted" && profile.is_manager && (
-          <ApproveRejectControls
-            requestId={id}
-            coordinators={coordinators}
-            category={request.category}
-          />
-        )}
+        {status === "submitted" &&
+          (canDo(profile, "approve_request") || canDo(profile, "reject_request")) && (
+            <ApproveRejectControls
+              requestId={id}
+              coordinators={coordinators}
+              category={request.category}
+              canApprove={canDo(profile, "approve_request")}
+              canReject={canDo(profile, "reject_request")}
+            />
+          )}
         {canAssignTechnicians && (
           <AssignTechniciansControl requestId={id} technicians={technicians} />
         )}

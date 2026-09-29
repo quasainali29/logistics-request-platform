@@ -10,6 +10,7 @@ import {
 } from "@/lib/types";
 import { getWorkflowStages } from "@/lib/cachedLookups";
 import { getManagerDepartmentScope, NO_DEPARTMENT_MATCH } from "@/lib/departmentScope";
+import { canDo } from "@/lib/permissions";
 import Link from "next/link";
 import {
   format,
@@ -618,6 +619,8 @@ export default async function DashboardPage({
         "department",
         managerDepartmentScope.length ? managerDepartmentScope : NO_DEPARTMENT_MATCH
       );
+    } else if (!canDo(profile, "view_all_requests")) {
+      query = query.eq("requestor_id", profile.id);
     }
   }
 

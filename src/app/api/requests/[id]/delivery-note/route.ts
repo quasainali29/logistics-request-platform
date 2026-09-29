@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/auth";
+import { canDo } from "@/lib/permissions";
 import { buildDeliveryNoteDocx, type DeliveryNoteItem, type SupportedImageType } from "@/lib/deliveryNote";
 import { format } from "date-fns";
 
@@ -8,12 +9,8 @@ import { format } from "date-fns";
 // the delivery — coordinators, warehouse staff, and managers — not the
 // original requester. Available on any delivery request regardless of
 // status; it always reflects whatever is on the request right now.
-function canGenerateDeliveryNote(profile: { is_manager?: boolean; role: string }) {
-  return (
-    profile.is_manager ||
-    profile.role === "logistics_coordinator" ||
-    profile.role === "warehouse_team"
-  );
+function canGenerateDeliveryNote(profile: Parameters<typeof canDo>[0]) {
+  return canDo(profile, "generate_documents");
 }
 
 function inferImageType(url: string, contentType: string | null): SupportedImageType {

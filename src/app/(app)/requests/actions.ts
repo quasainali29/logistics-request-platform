@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import type { AttachmentFile, CostCategory } from "@/lib/types";
 import { getWorkflowStages } from "@/lib/cachedLookups";
+import { currentUserCanDo } from "@/lib/permissions";
 import { sendNotificationEmail } from "@/lib/email";
 import {
   buildRequestEmailHtml,
@@ -159,6 +160,10 @@ export async function createRequest(formData: FormData) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
+
+  if (!(await currentUserCanDo(supabase, user.id, "create_request"))) {
+    redirect(`/requests/new?error=${encodeURIComponent("You don't have permission to create requests.")}`);
+  }
 
   const category = formData.get("category") as string;
 
@@ -847,6 +852,10 @@ export async function updateRequest(requestId: string, formData: FormData) {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
+  if (!(await currentUserCanDo(supabase, user.id, "edit_request"))) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent("You don't have permission to edit requests.")}`);
+  }
+
   const { data: existing } = await supabase
     .from("requests")
     .select("requestor_id, status, category")
@@ -914,6 +923,14 @@ export async function managerEditRequest(requestId: string, formData: FormData) 
 
   if (!existing) {
     redirect(`/requests/${requestId}?error=${encodeURIComponent("Request not found")}`);
+  }
+
+  if (!(await currentUserCanDo(supabase, user.id, "edit_request"))) {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "You don't have permission to edit requests."
+      )}`
+    );
   }
 
   const isCoordinator = actorRole === "logistics_coordinator";
@@ -1146,11 +1163,10 @@ export async function approveAndAssignRequest(requestId: string, coordinatorId: 
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const isManager = await currentUserIsManager(supabase, user.id);
-  if (!isManager) {
+  if (!(await currentUserCanDo(supabase, user.id, "approve_request"))) {
     redirect(
       `/requests/${requestId}?error=${encodeURIComponent(
-        "Only managers can approve requests."
+        "You don't have permission to approve requests."
       )}`
     );
   }
@@ -1547,11 +1563,10 @@ export async function reassignCoordinator(requestId: string, coordinatorId: stri
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const isManager = await currentUserIsManager(supabase, user.id);
-  if (!isManager) {
+  if (!(await currentUserCanDo(supabase, user.id, "assign_coordinator"))) {
     redirect(
       `/requests/${requestId}?error=${encodeURIComponent(
-        "Only managers can reassign a coordinator."
+        "You don't have permission to assign a coordinator."
       )}`
     );
   }
@@ -1654,6 +1669,14 @@ export async function technicianCompleteJob(requestId: string, formData: FormDat
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
+
+  if (!(await currentUserCanDo(supabase, user.id, "complete_job_as_technician"))) {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "You don't have permission to complete jobs."
+      )}`
+    );
+  }
 
   const [{ data: request }, { data: crewRow }, { data: technicianProfile }] = await Promise.all([
     supabase
@@ -2037,11 +2060,10 @@ export async function rejectRequest(requestId: string, reason?: string) {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const isManager = await currentUserIsManager(supabase, user.id);
-  if (!isManager) {
+  if (!(await currentUserCanDo(supabase, user.id, "reject_request"))) {
     redirect(
       `/requests/${requestId}?error=${encodeURIComponent(
-        "Only managers can reject requests."
+        "You don't have permission to reject requests."
       )}`
     );
   }
@@ -2106,11 +2128,10 @@ export async function rejectRequestClosed(requestId: string, reason: string) {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const isManager = await currentUserIsManager(supabase, user.id);
-  if (!isManager) {
+  if (!(await currentUserCanDo(supabase, user.id, "reject_request"))) {
     redirect(
       `/requests/${requestId}?error=${encodeURIComponent(
-        "Only managers can reject requests."
+        "You don't have permission to reject requests."
       )}`
     );
   }
@@ -2192,6 +2213,14 @@ export async function closeRequestWithDocuments(requestId: string, formData: For
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
+
+  if (!(await currentUserCanDo(supabase, user.id, "close_out_request"))) {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "You don't have permission to close out requests."
+      )}`
+    );
+  }
 
   const { data: request } = await supabase
     .from("requests")
@@ -2287,14 +2316,7 @@ export async function deleteRequests(requestIds: string[]) {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("*, role_info:roles!profiles_role_fkey(is_manager)")
-    .eq("id", user.id)
-    .single();
-
-  const isManager = !!(profile?.role_info as { is_manager: boolean } | null)?.is_manager;
-  if (!isManager) {
+  if (!(await currentUserCanDo(supabase, user.id, "delete_request"))) {
     redirect(`/requests?error=${encodeURIComponent("You don't have permission to delete requests.")}`);
   }
 
@@ -2323,6 +2345,14 @@ export async function addComment(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
+
+  if (!(await currentUserCanDo(supabase, user.id, "comment_on_request"))) {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "You don't have permission to comment on requests."
+      )}`
+    );
+  }
 
   const uniqueMentionIds = Array.from(new Set(mentionedUserIds)).filter(Boolean);
 

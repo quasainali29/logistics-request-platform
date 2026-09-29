@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/auth";
+import { canDo } from "@/lib/permissions";
 import { format, parseISO } from "date-fns";
 import {
   renderClosureDocument,
@@ -26,12 +27,8 @@ import {
 // breakdown, none of which the .docx versions know about. Same audience as
 // the .docx links -- coordinators, warehouse staff, managers -- not the
 // original requester.
-function canDownloadClosureDocument(profile: { is_manager?: boolean; role: string }) {
-  return (
-    profile.is_manager ||
-    profile.role === "logistics_coordinator" ||
-    profile.role === "warehouse_team"
-  );
+function canDownloadClosureDocument(profile: Parameters<typeof canDo>[0]) {
+  return canDo(profile, "generate_documents");
 }
 
 function personnelTypeLabel(value: string | null) {
