@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
+import { currentUserCanDo } from "@/lib/permissions";
 import { revalidatePath, revalidateTag } from "next/cache";
 
 export async function updateBranding(formData: FormData) {
@@ -11,13 +12,7 @@ export async function updateBranding(formData: FormData) {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("*, role_info:roles!profiles_role_fkey(is_manager)")
-    .eq("id", user.id)
-    .single();
-
-  if (!profile || !(profile.role_info as { is_manager: boolean } | null)?.is_manager) {
+  if (!(await currentUserCanDo(supabase, user.id, "manage_branding"))) {
     redirect("/dashboard");
   }
 

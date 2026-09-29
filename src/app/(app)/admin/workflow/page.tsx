@@ -1,4 +1,5 @@
 import { getProfile } from "@/lib/auth";
+import { canDo } from "@/lib/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import type { Category, RoleRow, WorkflowStage, WorkflowTransition } from "@/lib/types";
@@ -27,7 +28,7 @@ export default async function WorkflowAdminPage({
   searchParams: Promise<{ category?: string; error?: string }>;
 }) {
   const profile = await getProfile();
-  if (!profile.is_manager) redirect("/dashboard");
+  if (!canDo(profile, "manage_workflow_stages")) redirect("/dashboard");
 
   const params = await searchParams;
   const category = (CATEGORIES.includes(params.category as Category)

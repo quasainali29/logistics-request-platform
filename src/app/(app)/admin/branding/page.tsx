@@ -1,4 +1,5 @@
 import { getProfile } from "@/lib/auth";
+import { canDo } from "@/lib/permissions";
 import { getAppSettings } from "@/lib/cachedLookups";
 import { redirect } from "next/navigation";
 import type { AppSettings } from "@/lib/types";
@@ -11,7 +12,7 @@ export default async function BrandingAdminPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const profile = await getProfile();
-  if (!profile.is_manager) redirect("/dashboard");
+  if (!canDo(profile, "manage_branding")) redirect("/dashboard");
 
   const { error } = await searchParams;
   const settings = await getAppSettings();
