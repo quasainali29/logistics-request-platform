@@ -1,5 +1,5 @@
 import { getProfile } from "@/lib/auth";
-import { can } from "@/lib/permissions";
+import { canDo } from "@/lib/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { format, parseISO } from "date-fns";
@@ -21,7 +21,7 @@ export default async function AdminPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const profile = await getProfile();
-  if (!profile.is_manager && !can(profile, "access_admin_panel")) redirect("/dashboard");
+  if (!canDo(profile, "access_admin_panel")) redirect("/dashboard");
 
   const { error } = await searchParams;
   const supabase = await createClient();

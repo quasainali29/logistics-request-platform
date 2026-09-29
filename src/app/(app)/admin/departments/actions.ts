@@ -2,7 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getProfile } from "@/lib/auth";
-import { can } from "@/lib/permissions";
+import { canDo } from "@/lib/permissions";
 import { revalidatePath, updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 
@@ -12,7 +12,7 @@ import { redirect } from "next/navigation";
 // already see.
 async function requirePermission(key: string) {
   const profile = await getProfile();
-  if (!profile.is_manager && !can(profile, key)) {
+  if (!canDo(profile, key)) {
     redirect("/admin/departments?error=You+don't+have+permission+to+do+that");
   }
   return profile;

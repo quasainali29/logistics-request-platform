@@ -1,6 +1,6 @@
 import { Fragment } from "react";
 import { getProfile } from "@/lib/auth";
-import { can } from "@/lib/permissions";
+import { canDo } from "@/lib/permissions";
 import { getPermissionMatrix } from "@/lib/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
@@ -17,7 +17,7 @@ export default async function PermissionsPage({
   const profile = await getProfile();
   // access_admin_panel gets you into /admin at all; this page additionally
   // needs manage_roles_permissions since it can grant any access to anyone.
-  if (!profile.is_manager && !can(profile, "manage_roles_permissions")) {
+  if (!canDo(profile, "manage_roles_permissions")) {
     redirect("/dashboard");
   }
 

@@ -2,7 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getProfile } from "@/lib/auth";
-import { can } from "@/lib/permissions";
+import { canDo } from "@/lib/permissions";
 import { revalidatePath, updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 
@@ -11,7 +11,7 @@ import { redirect } from "next/navigation";
 // manager can never be locked out of a page they can already see.
 async function requirePermission(key: string) {
   const profile = await getProfile();
-  if (!profile.is_manager && !can(profile, key)) {
+  if (!canDo(profile, key)) {
     redirect("/admin/projects?error=You+don't+have+permission+to+do+that");
   }
   return profile;

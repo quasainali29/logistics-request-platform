@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendNotificationEmail } from "@/lib/email";
 import { getProfile } from "@/lib/auth";
-import { can } from "@/lib/permissions";
+import { canDo } from "@/lib/permissions";
 import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { PROTECTED_ROLE_KEYS } from "@/lib/roleConstants";
@@ -35,15 +35,16 @@ async function requireManager() {
 // back to redirecting home rather than throwing, matching requireManager's
 // behavior for actions invoked from a plain form/page.
 //
-// is_manager is always an allowed override on top of the specific key —
-// managers could do everything in this panel before the permissions matrix
-// existed, and without this a manager whose role hasn't been explicitly
-// granted a given key (e.g. only "main_admin" has manage_roles_permissions
-// in the seed data) would otherwise be locked out of pages they can still
-// see (the page-level checks already allow is_manager through).
+// canDo() lets only the two super-roles (logistics_manager, main_admin)
+// bypass the matrix -- any other is_manager=true role (including custom
+// roles created via Admin > Roles) is governed strictly by what's checked
+// for it in Admin > Permissions. This used to backstop on the flat
+// is_manager flag for any manager, which meant an unchecked box here did
+// nothing for a custom manager role -- see the Requests-category fix for
+// the same bug and rationale.
 async function requirePermission(key: string) {
   const profile = await getProfile();
-  if (!profile.is_manager && !can(profile, key)) {
+  if (!canDo(profile, key)) {
     redirect("/admin?error=You+don't+have+permission+to+do+that");
   }
   const supabase = await createClient();

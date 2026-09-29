@@ -1,5 +1,5 @@
 import { getProfile } from "@/lib/auth";
-import { can } from "@/lib/permissions";
+import { canDo } from "@/lib/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { format, parseISO } from "date-fns";
@@ -14,7 +14,7 @@ export default async function DepartmentsPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const profile = await getProfile();
-  if (!profile.is_manager && !can(profile, "manage_departments")) {
+  if (!canDo(profile, "manage_departments")) {
     redirect("/dashboard");
   }
 

@@ -1,5 +1,5 @@
 import { getProfile } from "@/lib/auth";
-import { can } from "@/lib/permissions";
+import { canDo } from "@/lib/permissions";
 import { redirect } from "next/navigation";
 import type { Profile } from "@/lib/types";
 
@@ -11,7 +11,7 @@ import type { Profile } from "@/lib/types";
 // their role yet.
 export async function requireReportPermission(key: string): Promise<Profile> {
   const profile = await getProfile();
-  if (!profile.is_manager && !can(profile, key)) {
+  if (!canDo(profile, key)) {
     redirect("/reports?error=You+don't+have+permission+to+view+that+report");
   }
   return profile;

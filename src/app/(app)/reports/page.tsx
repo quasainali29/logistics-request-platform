@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { getProfile } from "@/lib/auth";
-import { can } from "@/lib/permissions";
+import { canDo } from "@/lib/permissions";
 import { redirect } from "next/navigation";
 import { ReportsNav } from "./ReportsNav";
 
@@ -49,12 +49,12 @@ export default async function ReportsPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const profile = await getProfile();
-  if (!profile.is_manager && !can(profile, "view_reports")) {
+  if (!canDo(profile, "view_reports")) {
     redirect("/dashboard");
   }
 
   const { error } = await searchParams;
-  const visibleCards = REPORT_CARDS.filter((c) => profile.is_manager || can(profile, c.permKey));
+  const visibleCards = REPORT_CARDS.filter((c) => canDo(profile, c.permKey));
 
   return (
     <div className="p-8 max-w-5xl">
