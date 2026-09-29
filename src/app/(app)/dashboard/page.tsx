@@ -11,6 +11,11 @@ import {
 import { getWorkflowStages } from "@/lib/cachedLookups";
 import { getManagerDepartmentScope, NO_DEPARTMENT_MATCH } from "@/lib/departmentScope";
 import { canDo } from "@/lib/permissions";
+import {
+  computeCompletedVerificationBuckets,
+  VERIFICATION_BUCKET_LABELS,
+  VERIFICATION_BUCKET_COLORS,
+} from "@/lib/requestVerificationStatus";
 import Link from "next/link";
 import {
   format,
@@ -701,6 +706,27 @@ export default async function DashboardPage({
     { label: "Completed this month", value: completedThisMonth.length },
   ];
 
+  // Two requestor-only sections surfaced above everything else on their
+  // dashboard -- "own completed jobs waiting on my sign-off" and "what
+  // I've submitted, most recent first". Both are scoped for free since
+  // `all` is already narrowed to requestor_id = profile.id for !isStaff
+  // above. The "completed" status bucket-swap (waiting_verification /
+  // require_recheck / verified) mirrors RequestsTable.tsx's displayStatus
+  // so the same request never shows a bare "Completed" pill in one place
+  // and a specific sub-status in another.
+  const myCompletedIds = !isStaff
+    ? all.filter((r) => r.status === "completed").map((r) => r.id)
+    : [];
+  const myVerificationBuckets: Map<string, import("@/lib/requestVerificationStatus").CompletedVerificationBucket> = !isStaff
+    ? await computeCompletedVerificationBuckets(supabase, myCompletedIds)
+    : new Map();
+  const waitingForMyVerification = !isStaff
+    ? all.filter((r) => myVerificationBuckets.get(r.id) === "waiting_verification")
+    : [];
+  const MY_REQUESTS_VISIBLE = 6;
+  const myRecentRequests = !isStaff ? all.slice(0, MY_REQUESTS_VISIBLE) : [];
+  const myRequestsMoreCount = !isStaff ? Math.max(0, all.length - MY_REQUESTS_VISIBLE) : 0;
+
   return (
     <div className="p-8 max-w-6xl">
       <div className="mb-6">
@@ -711,6 +737,129 @@ export default async function DashboardPage({
           Welcome back, {profile.full_name.split(" ")[0]}.
         </p>
       </div>
+
+      {!isStaff && (
+        <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-slate-900">Waiting for your verification</h2>
+            {waitingForMyVerification.length > 0 && (
+              <span className="text-xs font-semibold bg-red-100 text-red-700 rounded-full px-2 py-0.5">
+                {waitingForMyVerification.length}
+              </span>
+            )}
+          </div>
+          {waitingForMyVerification.length === 0 ? (
+            <p className="text-sm text-slate-400">Nothing waiting on your review right now.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-[11px] uppercase text-slate-400">
+                    <th className="font-normal pb-2 pr-2">Request</th>
+                    <th className="font-normal pb-2 px-2">Category</th>
+                    <th className="font-normal pb-2 px-2">Completed</th>
+                    <th className="font-normal pb-2 pl-2"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {waitingForMyVerification.map((r) => (
+                    <tr key={r.id} className="border-t border-slate-100">
+                      <td className="py-2 pr-2 max-w-[240px]">
+                        <Link
+                          href={`/requests/${r.id}`}
+                          className="text-slate-900 hover:underline truncate block"
+                        >
+                          {r.request_number} · {r.title}
+                        </Link>
+                      </td>
+                      <td className="py-2 px-2 text-slate-500 whitespace-nowrap">
+                        {CATEGORY_LABELS[r.category as keyof typeof CATEGORY_LABELS]}
+                      </td>
+                      <td className="py-2 px-2 text-slate-500 whitespace-nowrap">
+                        {format(parseISO(r.updated_at), "MMM d")}
+                      </td>
+                      <td className="py-2 pl-2 text-right whitespace-nowrap">
+                        <Link
+                          href={`/requests/${r.id}/verify`}
+                          className="text-[var(--accent)] hover:underline text-sm font-medium"
+                        >
+                          Verify →
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!isStaff && (
+        <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6">
+          <h2 className="text-sm font-semibold text-slate-900 mb-3">Your requests</h2>
+          {myRecentRequests.length === 0 ? (
+            <p className="text-sm text-slate-400">You haven&rsquo;t submitted any requests yet.</p>
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-[11px] uppercase text-slate-400">
+                      <th className="font-normal pb-2 pr-2">Request</th>
+                      <th className="font-normal pb-2 px-2">Category</th>
+                      <th className="font-normal pb-2 px-2">Status</th>
+                      <th className="font-normal pb-2 pl-2">Submitted</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {myRecentRequests.map((r) => {
+                      const bucket = myVerificationBuckets.get(r.id);
+                      const label =
+                        r.status === "completed" && bucket
+                          ? VERIFICATION_BUCKET_LABELS[bucket]
+                          : formatStatusLabel(r.category, r.status, stageList);
+                      const color =
+                        r.status === "completed" && bucket
+                          ? VERIFICATION_BUCKET_COLORS[bucket]
+                          : statusColor(r.category, r.status, stageList);
+                      return (
+                        <tr key={r.id} className="border-t border-slate-100">
+                          <td className="py-2 pr-2 max-w-[240px]">
+                            <Link
+                              href={`/requests/${r.id}`}
+                              className="text-slate-900 hover:underline truncate block"
+                            >
+                              {r.request_number} · {r.title}
+                            </Link>
+                          </td>
+                          <td className="py-2 px-2 text-slate-500 whitespace-nowrap">
+                            {CATEGORY_LABELS[r.category as keyof typeof CATEGORY_LABELS]}
+                          </td>
+                          <td className="py-2 px-2 whitespace-nowrap">
+                            <span className={`text-xs px-2 py-0.5 rounded-full ${color}`}>{label}</span>
+                          </td>
+                          <td className="py-2 pl-2 text-slate-500 whitespace-nowrap">
+                            {format(parseISO(r.created_at), "MMM d, yyyy")}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {myRequestsMoreCount > 0 && (
+                <p className="text-xs text-slate-400 mt-3">
+                  +{myRequestsMoreCount} more ·{" "}
+                  <Link href="/requests" className="text-[var(--accent)]">
+                    View all
+                  </Link>
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         {metrics.map((m) => (
