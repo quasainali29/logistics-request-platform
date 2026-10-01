@@ -189,6 +189,19 @@ export interface RequestVerification {
   verifier?: { full_name: string };
 }
 
+export interface RequestHold {
+  id: string;
+  request_id: string;
+  held_by: string;
+  held_at: string;
+  hold_reason: string;
+  released_by: string | null;
+  released_at: string | null;
+  release_note: string | null;
+  holder?: { full_name: string };
+  releaser?: { full_name: string } | null;
+}
+
 export interface AttachmentFile {
   name: string;
   url: string;

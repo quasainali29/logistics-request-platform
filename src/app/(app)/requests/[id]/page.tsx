@@ -26,6 +26,7 @@ import {
   type LaborCloseoutLine,
   type RequestCostLine,
   type RequestVerification,
+  type RequestHold,
   SIGNED_BY_ROLE_LABELS,
 } from "@/lib/types";
 import { getWorkflowStages } from "@/lib/cachedLookups";
@@ -40,6 +41,8 @@ import {
   ReassignCoordinatorControl,
   UnassignCoordinatorControl,
   ReopenForReworkControl,
+  HoldRequestControl,
+  ReleaseHoldControl,
 } from "./actions-client";
 import { CloseoutForm } from "./CloseoutForm";
 import { CostBreakdownManager } from "./CostBreakdownManager";
@@ -151,6 +154,7 @@ export default async function RequestDetailPage({
     { data: laborCloseoutLines },
     { data: costLines },
     { data: latestVerification },
+    { data: openHold },
   ] = await Promise.all([
     supabase
       .from("comments")
@@ -186,6 +190,15 @@ export default async function RequestDetailPage({
       .eq("request_id", id)
       .order("created_at", { ascending: false })
       .limit(1)
+      .maybeSingle(),
+    // An open hold (released_at IS NULL) pauses the request without
+    // touching its status -- see migration 032. At most one open row per
+    // request (holdRequest checks for an existing one before inserting).
+    supabase
+      .from("request_holds")
+      .select("*, holder:profiles!request_holds_held_by_fkey(full_name)")
+      .eq("request_id", id)
+      .is("released_at", null)
       .maybeSingle(),
   ]);
 
@@ -364,6 +377,18 @@ export default async function RequestDetailPage({
     !currentStage?.is_terminal &&
     !(isOwner && status === "returned_for_info");
 
+  // Hold/release -- same permission gate as Approve/Reject (either one
+  // qualifies), available at any non-terminal stage, not just Submitted.
+  // See migration 032. Unlike the generic workflow transitions above, an
+  // open hold is additive to request.status rather than a stage of its
+  // own, so it's computed independently here and used to suppress the
+  // rest of the action bar below rather than filtering visibleTransitions.
+  const activeHold = openHold as RequestHold | null;
+  const isOnHold = !!activeHold;
+  const canHoldOrReleaseFlag =
+    canDo(profile, "approve_request") || canDo(profile, "reject_request");
+  const canHoldRequest = canHoldOrReleaseFlag && !isOnHold && !currentStage?.is_terminal;
+
   // A crew can be assigned once the request is under a coordinator's care,
   // and managed (add/remove individual technicians) any time after that up
   // until the category's terminal stage -- same window as
@@ -435,6 +460,11 @@ export default async function RequestDetailPage({
           >
             {request.priority}
           </span>
+          {isOnHold && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-medium">
+              On Hold
+            </span>
+          )}
         </div>
         <p className="text-sm text-slate-500 mt-1">
           {CATEGORY_LABELS[request.category as Category]} · Submitted by{" "}
@@ -462,87 +492,107 @@ export default async function RequestDetailPage({
         )}
       </div>
 
-      {/* Action bar — driven by the admin-configured workflow for this category */}
-      <div className="flex flex-wrap gap-2 mb-8">
-        {status === "submitted" &&
-          (canDo(profile, "approve_request") || canDo(profile, "reject_request")) && (
-            <ApproveRejectControls
+      {isOnHold && activeHold && (
+        <div className="mb-6 bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-semibold text-amber-800">On hold</p>
+            <p className="text-sm text-amber-900 mt-1">{activeHold.hold_reason}</p>
+            <p className="text-xs text-amber-700 mt-2">
+              Held by {activeHold.holder?.full_name ?? "someone"} on{" "}
+              {format(parseISO(activeHold.held_at), "MMM d, yyyy 'at' h:mm a")}
+            </p>
+          </div>
+          {canHoldOrReleaseFlag && <ReleaseHoldControl requestId={id} />}
+        </div>
+      )}
+
+      {/* Action bar — driven by the admin-configured workflow for this category.
+          Hidden entirely while on hold (see the banner above instead) -- a held
+          request can't be approved, rejected, assigned, or otherwise progressed
+          until it's released. */}
+      {!isOnHold && (
+        <div className="flex flex-wrap gap-2 mb-8">
+          {status === "submitted" &&
+            (canDo(profile, "approve_request") || canDo(profile, "reject_request")) && (
+              <ApproveRejectControls
+                requestId={id}
+                coordinators={coordinators}
+                category={request.category}
+                canApprove={canDo(profile, "approve_request")}
+                canReject={canDo(profile, "reject_request")}
+              />
+            )}
+          {canHoldRequest && <HoldRequestControl requestId={id} />}
+          {canAssignTechnicians && (
+            <AssignTechniciansControl requestId={id} technicians={technicians} />
+          )}
+          {canAcceptJob && <AcceptJobControl requestId={id} />}
+          {visibleTransitions.map((t) => (
+            <StatusButton
+              key={t.id}
               requestId={id}
-              coordinators={coordinators}
-              category={request.category}
-              canApprove={canDo(profile, "approve_request")}
-              canReject={canDo(profile, "reject_request")}
+              status={t.to_key}
+              label={t.label}
+              variant={t.variant}
+            />
+          ))}
+          {isAssignedTechnician && status === "on_site" && (
+            <Link
+              href={`/requests/${id}/complete`}
+              className="rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 transition"
+            >
+              Mark Completed
+            </Link>
+          )}
+          {isOwner && needsVerification && (
+            <Link
+              href={`/requests/${id}/verify`}
+              className="rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 transition"
+            >
+              Verify completion
+            </Link>
+          )}
+          {canManageCloseout && currentVerification?.decision === "not_satisfactory" && (
+            <ReopenForReworkControl requestId={id} />
+          )}
+          {isOwner && status === "returned_for_info" && (
+            <Link
+              href={`/requests/${id}/edit`}
+              className="rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 transition"
+            >
+              Edit &amp; Resubmit
+            </Link>
+          )}
+          {canManageCrew && (
+            <ManageTechniciansControl
+              requestId={id}
+              crew={crew}
+              availableTechnicians={availableTechnicians}
             />
           )}
-        {canAssignTechnicians && (
-          <AssignTechniciansControl requestId={id} technicians={technicians} />
-        )}
-        {canAcceptJob && <AcceptJobControl requestId={id} />}
-        {visibleTransitions.map((t) => (
-          <StatusButton
-            key={t.id}
-            requestId={id}
-            status={t.to_key}
-            label={t.label}
-            variant={t.variant}
-          />
-        ))}
-        {isAssignedTechnician && status === "on_site" && (
-          <Link
-            href={`/requests/${id}/complete`}
-            className="rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 transition"
-          >
-            Mark Completed
-          </Link>
-        )}
-        {isOwner && needsVerification && (
-          <Link
-            href={`/requests/${id}/verify`}
-            className="rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 transition"
-          >
-            Verify completion
-          </Link>
-        )}
-        {canManageCloseout && currentVerification?.decision === "not_satisfactory" && (
-          <ReopenForReworkControl requestId={id} />
-        )}
-        {isOwner && status === "returned_for_info" && (
-          <Link
-            href={`/requests/${id}/edit`}
-            className="rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 transition"
-          >
-            Edit &amp; Resubmit
-          </Link>
-        )}
-        {canManageCrew && (
-          <ManageTechniciansControl
-            requestId={id}
-            crew={crew}
-            availableTechnicians={availableTechnicians}
-          />
-        )}
-        {canManageCoordinatorAssignment && (
-          <ReassignCoordinatorControl
-            requestId={id}
-            coordinators={coordinators}
-            currentCoordinatorName={request.owner?.full_name ?? null}
-          />
-        )}
-        {canManageCoordinatorAssignment && (
-          <UnassignCoordinatorControl
-            requestId={id}
-            currentCoordinatorName={request.owner?.full_name ?? null}
-          />
-        )}
-        {canManagerEditRequest && (
-          <Link
-            href={`/requests/${id}/edit`}
-            className="rounded-md px-4 py-2 text-sm font-medium border border-slate-300 text-slate-700 hover:bg-slate-50 transition"
-          >
-            Edit Request
-          </Link>
-        )}
-      </div>
+          {canManageCoordinatorAssignment && (
+            <ReassignCoordinatorControl
+              requestId={id}
+              coordinators={coordinators}
+              currentCoordinatorName={request.owner?.full_name ?? null}
+            />
+          )}
+          {canManageCoordinatorAssignment && (
+            <UnassignCoordinatorControl
+              requestId={id}
+              currentCoordinatorName={request.owner?.full_name ?? null}
+            />
+          )}
+          {canManagerEditRequest && (
+            <Link
+              href={`/requests/${id}/edit`}
+              className="rounded-md px-4 py-2 text-sm font-medium border border-slate-300 text-slate-700 hover:bg-slate-50 transition"
+            >
+              Edit Request
+            </Link>
+          )}
+        </div>
+      )}
 
       {closeoutRow?.signature_url && (
         <section className="mb-8 bg-white border border-slate-200 rounded-xl p-5">

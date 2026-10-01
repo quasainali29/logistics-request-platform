@@ -386,6 +386,16 @@ export default async function RequestsPage({
   const verificationBucketsMap = await computeCompletedVerificationBuckets(supabase, completedIdsOnPage);
   const verificationBuckets = Object.fromEntries(verificationBucketsMap);
 
+  // Which of this page's rows currently have an open hold (released_at
+  // IS NULL) -- RequestsTable shows a small "On Hold" badge for these.
+  // Deliberately doesn't affect filtering/sorting/counts anywhere; a held
+  // request stays wherever its status already puts it.
+  const pageIds = (requests as any[]).map((r) => r.id as string);
+  const { data: openHoldRows } = pageIds.length
+    ? await supabase.from("request_holds").select("request_id").in("request_id", pageIds).is("released_at", null)
+    : { data: [] as { request_id: string }[] };
+  const heldRequestIds = new Set((openHoldRows ?? []).map((h) => h.request_id as string));
+
   function pageHref(p: number) {
     const sp = new URLSearchParams();
     if (category) sp.set("category", category);
@@ -452,6 +462,7 @@ export default async function RequestsPage({
         isManager={isManager}
         canDelete={canDo(profile, "delete_request")}
         verificationBuckets={verificationBuckets}
+        heldRequestIds={heldRequestIds}
       />
 
       {totalPages > 1 && (

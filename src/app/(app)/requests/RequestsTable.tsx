@@ -69,6 +69,7 @@ export default function RequestsTable({
   isManager,
   canDelete,
   verificationBuckets,
+  heldRequestIds,
 }: {
   requests: RequestRow[];
   stageList: WorkflowStage[];
@@ -76,6 +77,7 @@ export default function RequestsTable({
   isManager: boolean;
   canDelete: boolean;
   verificationBuckets: Record<string, CompletedVerificationBucket>;
+  heldRequestIds: Set<string>;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [pending, startTransition] = useTransition();
@@ -248,6 +250,11 @@ export default function RequestsTable({
                   <span className={`text-xs px-2 py-0.5 rounded-full ${status.color}`}>
                     {status.label}
                   </span>
+                  {heldRequestIds.has(r.id) && (
+                    <span className="ml-1 text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-medium">
+                      On Hold
+                    </span>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-slate-600">
                   {r.owner?.full_name ?? <span className="text-slate-400">Not assigned</span>}

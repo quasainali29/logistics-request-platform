@@ -14,6 +14,8 @@ import {
   reassignCoordinator,
   unassignCoordinator,
   reopenForRework,
+  holdRequest,
+  releaseHold,
 } from "../actions";
 
 export function StatusButton({
@@ -769,5 +771,145 @@ export function CommentBox({
         </div>
       )}
     </div>
+  );
+}
+
+// Puts an active (non-terminal) request on hold -- reason is required,
+// same mandatory-reason pattern as the Return for info / Reject dialogs
+// above. Visibility is gated by the caller (same permission as Approve/
+// Reject); this component just renders the button + popup once it's
+// known to be allowed.
+export function HoldRequestControl({ requestId }: { requestId: string }) {
+  const [pending, startTransition] = useTransition();
+  const [showHold, setShowHold] = useState(false);
+  const [reason, setReason] = useState("");
+
+  function handleConfirmHold() {
+    if (!reason.trim()) return;
+    startTransition(() => {
+      holdRequest(requestId, reason.trim());
+      setShowHold(false);
+      setReason("");
+    });
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        disabled={pending}
+        onClick={() => setShowHold(true)}
+        className="rounded-md px-4 py-2 text-sm font-medium border border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100 transition disabled:opacity-50"
+      >
+        Hold
+      </button>
+
+      {showHold && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 w-full max-w-sm">
+            <h3 className="text-sm font-semibold text-slate-900 mb-1">Put this request on hold</h3>
+            <p className="text-xs text-slate-500 mb-3">
+              Pauses the request where it is -- its status doesn&rsquo;t change, but it&rsquo;s
+              flagged on hold until released. A reason is required.
+            </p>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              rows={3}
+              placeholder="Why is this request on hold…"
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-amber-400"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowHold(false);
+                  setReason("");
+                }}
+                className="rounded-md px-4 py-2 text-sm font-medium bg-white border border-slate-300 text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={pending || !reason.trim()}
+                onClick={handleConfirmHold}
+                className="rounded-md px-4 py-2 text-sm font-medium bg-amber-500 text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {pending ? "Holding…" : "Put on hold"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// Releases an open hold -- note is optional (the hold_reason already
+// captured why it was paused; this is just an optional "what changed").
+export function ReleaseHoldControl({ requestId }: { requestId: string }) {
+  const [pending, startTransition] = useTransition();
+  const [showRelease, setShowRelease] = useState(false);
+  const [note, setNote] = useState("");
+
+  function handleConfirmRelease() {
+    startTransition(() => {
+      releaseHold(requestId, note.trim() || undefined);
+      setShowRelease(false);
+      setNote("");
+    });
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        disabled={pending}
+        onClick={() => setShowRelease(true)}
+        className="rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 transition disabled:opacity-50"
+      >
+        Release hold
+      </button>
+
+      {showRelease && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 w-full max-w-sm">
+            <h3 className="text-sm font-semibold text-slate-900 mb-1">Release this hold</h3>
+            <p className="text-xs text-slate-500 mb-3">
+              The request resumes normally -- any actions that were hidden while on hold
+              become available again.
+            </p>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              rows={2}
+              placeholder="Optional note on what changed…"
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRelease(false);
+                  setNote("");
+                }}
+                className="rounded-md px-4 py-2 text-sm font-medium bg-white border border-slate-300 text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={pending}
+                onClick={handleConfirmRelease}
+                className="rounded-md px-4 py-2 text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {pending ? "Releasing…" : "Release hold"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

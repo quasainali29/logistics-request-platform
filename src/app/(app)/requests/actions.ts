@@ -2401,3 +2401,129 @@ export async function addComment(
     console.error("Failed to send mention notification email:", err);
   }
 }
+
+// ============================================================
+// Hold / release -- pauses an active request without touching its
+// status or workflow stage. See migration 032 for the request_holds
+// table this reads/writes and the full design rationale.
+// ============================================================
+
+async function canHoldOrRelease(supabase: SupabaseClient, userId: string): Promise<boolean> {
+  // Same gate as Approve/Reject (either permission qualifies) -- a
+  // deliberate reuse rather than a new permission key, per product
+  // decision when this feature was scoped.
+  return (
+    (await currentUserCanDo(supabase, userId, "approve_request")) ||
+    (await currentUserCanDo(supabase, userId, "reject_request"))
+  );
+}
+
+export async function holdRequest(requestId: string, reason: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  if (!(await canHoldOrRelease(supabase, user.id))) {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "You don't have permission to hold requests."
+      )}`
+    );
+  }
+
+  if (!reason || !reason.trim()) {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent("A reason is required to put this request on hold.")}`
+    );
+  }
+
+  const [{ data: request }, stageList] = await Promise.all([
+    supabase.from("requests").select("status, category").eq("id", requestId).single(),
+    getWorkflowStages(),
+  ]);
+
+  if (!request) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent("Request not found.")}`);
+  }
+
+  const isTerminal =
+    stageList.find((s) => s.category === request.category && s.key === request.status)
+      ?.is_terminal ?? false;
+  if (isTerminal) {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "This request has already reached a final stage and can't be put on hold."
+      )}`
+    );
+  }
+
+  const { data: existingHold } = await supabase
+    .from("request_holds")
+    .select("id")
+    .eq("request_id", requestId)
+    .is("released_at", null)
+    .maybeSingle();
+  if (existingHold) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent("This request is already on hold.")}`);
+  }
+
+  const { error } = await supabase.from("request_holds").insert({
+    request_id: requestId,
+    held_by: user.id,
+    hold_reason: reason.trim(),
+  });
+
+  if (error) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath(`/requests/${requestId}`);
+  revalidatePath("/requests");
+  revalidatePath("/dashboard");
+}
+
+export async function releaseHold(requestId: string, note?: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  if (!(await canHoldOrRelease(supabase, user.id))) {
+    redirect(
+      `/requests/${requestId}?error=${encodeURIComponent(
+        "You don't have permission to release a hold."
+      )}`
+    );
+  }
+
+  const { data: openHold } = await supabase
+    .from("request_holds")
+    .select("id")
+    .eq("request_id", requestId)
+    .is("released_at", null)
+    .maybeSingle();
+
+  if (!openHold) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent("This request isn't on hold.")}`);
+  }
+
+  const { error } = await supabase
+    .from("request_holds")
+    .update({
+      released_by: user.id,
+      released_at: new Date().toISOString(),
+      release_note: note && note.trim() ? note.trim() : null,
+    })
+    .eq("id", openHold!.id);
+
+  if (error) {
+    redirect(`/requests/${requestId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath(`/requests/${requestId}`);
+  revalidatePath("/requests");
+  revalidatePath("/dashboard");
+}
