@@ -2440,7 +2440,13 @@ export async function holdRequest(requestId: string, reason: string) {
   }
 
   const [{ data: request }, stageList] = await Promise.all([
-    supabase.from("requests").select("status, category").eq("id", requestId).single(),
+    supabase
+      .from("requests")
+      .select(
+        "status, category, request_number, title, department, requestor_id, requestor:profiles!requests_requestor_id_fkey(full_name, email)"
+      )
+      .eq("id", requestId)
+      .single(),
     getWorkflowStages(),
   ]);
 
@@ -2477,6 +2483,62 @@ export async function holdRequest(requestId: string, reason: string) {
 
   if (error) {
     redirect(`/requests/${requestId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  // Notify the requester and whoever manages this request's department --
+  // best-effort, a failed send should never block the hold itself. The
+  // actor who placed the hold is excluded from recipients even if they
+  // happen to be the requester or a manager of their own department.
+  try {
+    const recipientIds = new Set<string>();
+    if (request.requestor_id && request.requestor_id !== user.id) {
+      recipientIds.add(request.requestor_id);
+    }
+    if (request.department) {
+      const { data: deptRow } = await supabase
+        .from("departments")
+        .select("id")
+        .eq("name", request.department)
+        .maybeSingle();
+      if (deptRow) {
+        const { data: deptManagers } = await supabase
+          .from("department_managers")
+          .select("manager_id")
+          .eq("department_id", deptRow.id);
+        for (const m of deptManagers ?? []) {
+          if (m.manager_id !== user.id) recipientIds.add(m.manager_id as string);
+        }
+      }
+    }
+
+    if (recipientIds.size > 0) {
+      const { data: recipientProfiles } = await supabase
+        .from("profiles")
+        .select("email")
+        .in("id", Array.from(recipientIds));
+      const toEmails = (recipientProfiles ?? []).map((p) => p.email).filter(Boolean) as string[];
+
+      if (toEmails.length > 0) {
+        const { data: actorProfile } = await supabase
+          .from("profiles")
+          .select("full_name")
+          .eq("id", user.id)
+          .maybeSingle();
+        const link = `${APP_URL}/requests/${requestId}`;
+
+        await sendNotificationEmail({
+          to: toEmails,
+          subject: `On hold: ${request.request_number} — ${request.title}`,
+          html: `<p><strong>${escapeHtml(actorProfile?.full_name ?? "Someone")}</strong> put <strong>${escapeHtml(
+            request.title
+          )}</strong> (${escapeHtml(request.request_number)}) on hold.</p><p style="padding:10px 14px;background:#fffbeb;border-left:3px solid #f59e0b;color:#0f172a;">${escapeHtml(
+            reason.trim()
+          )}</p><p><a href="${link}">View request</a></p>`,
+        });
+      }
+    }
+  } catch (err) {
+    console.error("Failed to send hold notification email:", err);
   }
 
   revalidatePath(`/requests/${requestId}`);
@@ -2521,6 +2583,58 @@ export async function releaseHold(requestId: string, note?: string) {
 
   if (error) {
     redirect(`/requests/${requestId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  // Best-effort notification to the requester that the hold has been
+  // released and the request is active again. Mirrors holdRequest's
+  // notification block (direct profile lookup, not the join), but release
+  // only notifies the requester (per product decision -- no
+  // department-manager notification here).
+  try {
+    const { data: request } = await supabase
+      .from("requests")
+      .select("requestor_id, request_number, title")
+      .eq("id", requestId)
+      .maybeSingle();
+
+    if (request && request.requestor_id && request.requestor_id !== user.id) {
+      const { data: requestorProfile } = await supabase
+        .from("profiles")
+        .select("email")
+        .eq("id", request.requestor_id)
+        .maybeSingle();
+      const toEmail = requestorProfile?.email;
+
+      if (toEmail) {
+        const { data: actorProfile } = await supabase
+          .from("profiles")
+          .select("full_name")
+          .eq("id", user.id)
+          .maybeSingle();
+        const link = `${APP_URL}/requests/${requestId}`;
+        const trimmedNote = note && note.trim() ? note.trim() : null;
+
+        await sendNotificationEmail({
+          to: toEmail,
+          subject: `Resumed: ${request.request_number} — ${request.title}`,
+          html: `<p><strong>${escapeHtml(
+            actorProfile?.full_name ?? "Someone"
+          )}</strong> released the hold on <strong>${escapeHtml(
+            request.title
+          )}</strong> (${escapeHtml(
+            request.request_number
+          )}) — it's active again and will continue processing normally.</p>${
+            trimmedNote
+              ? `<p style="padding:10px 14px;background:#f0fdf4;border-left:3px solid #22c55e;color:#0f172a;">${escapeHtml(
+                  trimmedNote
+                )}</p>`
+              : ""
+          }<p><a href="${link}">View request</a></p>`,
+        });
+      }
+    }
+  } catch (err) {
+    console.error("Failed to send release notification email:", err);
   }
 
   revalidatePath(`/requests/${requestId}`);
