@@ -189,9 +189,9 @@ export default async function AdminPage({
           <p className="text-xs text-slate-500 mb-4">
             Assign roles directly, deactivate access, or remove someone entirely.
           </p>
-          <div className="overflow-hidden border border-slate-200 rounded-lg mb-5">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+          <div className="border border-slate-200 rounded-lg mb-5 overflow-auto max-h-[28rem]">
+            <table className="w-full text-sm min-w-[720px]">
+              <thead className="bg-slate-50 text-slate-500 text-xs uppercase sticky top-0 z-10">
                 <tr>
                   <th className="text-left px-4 py-2 font-medium">Name</th>
                   <th className="text-left px-4 py-2 font-medium">Email</th>
