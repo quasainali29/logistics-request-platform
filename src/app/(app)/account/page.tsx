@@ -46,9 +46,15 @@ export default async function AccountPage({
         </div>
       )}
 
-      <section className="bg-white border border-slate-200 rounded-xl p-5">
-        <h2 className="text-sm font-semibold text-slate-900 mb-3">Current Role</h2>
-        <p className="text-sm text-slate-700">{formatRoleLabel(profile.role, roleList)}</p>
+      <section className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-900 mb-1">Current Role</h2>
+          <p className="text-sm text-slate-700">{formatRoleLabel(profile.role, roleList)}</p>
+        </div>
+        <div>
+          <h2 className="text-sm font-semibold text-slate-900 mb-1">Department</h2>
+          <p className="text-sm text-slate-700">{profile.department || "Not assigned"}</p>
+        </div>
       </section>
 
       <section className="bg-white border border-slate-200 rounded-xl p-5">
