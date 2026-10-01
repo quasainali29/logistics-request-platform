@@ -127,6 +127,15 @@ export default async function DashboardPage({
       stageList.find((s) => s.category === category && s.key === statusKey)?.is_terminal ??
       false;
 
+    // Which of these jobs currently have an open hold -- shown as a small
+    // badge in the mini-tables below, same as the Requests list. Doesn't
+    // change any filtering/counting here.
+    const jobIds = jobs.map((j) => j.id);
+    const { data: techOpenHolds } = jobIds.length
+      ? await supabase.from("request_holds").select("request_id").in("request_id", jobIds).is("released_at", null)
+      : { data: [] as { request_id: string }[] };
+    const heldRequestIds = new Set((techOpenHolds ?? []).map((h) => h.request_id as string));
+
     // Every card below is scoped to jobs whose due date falls in the
     // selected period (see periodFrom/periodTo above), so "Total assigned"
     // etc. read as "assigned in period" rather than all-time totals.
@@ -303,6 +312,7 @@ export default async function DashboardPage({
 
         <div className="space-y-4">
           <RequestMiniTable
+            heldRequestIds={heldRequestIds}
             title="Today's jobs"
             rows={dueToday}
             stageList={stageList}
@@ -311,6 +321,7 @@ export default async function DashboardPage({
             renderExtra={(r) => (r.conclude_date ? format(parseISO(r.conclude_date), "MMM d") : "—")}
           />
           <RequestMiniTable
+            heldRequestIds={heldRequestIds}
             title="New jobs"
             meta="(assigned in the last 2 days)"
             rows={newJobs.slice(0, 5)}
@@ -320,6 +331,7 @@ export default async function DashboardPage({
             renderExtra={(r) => format(parseISO((r as TechJob).assigned_at), "MMM d, h:mm a")}
           />
           <RequestMiniTable
+            heldRequestIds={heldRequestIds}
             title="Overdue jobs"
             meta={overdueJobs.length > 0 ? `(${overdueJobs.length})` : undefined}
             rows={overdueJobs.slice(0, 5)}
@@ -358,6 +370,15 @@ export default async function DashboardPage({
     const isTerminal = (category: string, statusKey: string) =>
       stageList.find((s) => s.category === category && s.key === statusKey)?.is_terminal ??
       false;
+
+    // Which of these requests currently have an open hold -- shown as a
+    // small badge in the mini-tables/lists below. Doesn't change any
+    // filtering/counting here.
+    const myReqIds = myReqs.map((r) => r.id);
+    const { data: coordOpenHolds } = myReqIds.length
+      ? await supabase.from("request_holds").select("request_id").in("request_id", myReqIds).is("released_at", null)
+      : { data: [] as { request_id: string }[] };
+    const heldRequestIds = new Set((coordOpenHolds ?? []).map((h) => h.request_id as string));
 
     // Every card below is scoped to requests whose due date falls in the
     // selected period (see periodFrom/periodTo above), so "Total assigned"
@@ -565,6 +586,7 @@ export default async function DashboardPage({
 
         <div className="space-y-4">
           <RequestMiniTable
+            heldRequestIds={heldRequestIds}
             title="Today's requests"
             rows={dueToday}
             stageList={stageList}
@@ -573,6 +595,7 @@ export default async function DashboardPage({
             renderExtra={(r) => (r.conclude_date ? format(parseISO(r.conclude_date), "MMM d") : "—")}
           />
           <RequestMiniTable
+            heldRequestIds={heldRequestIds}
             title="New requests"
             meta="(assigned to you in the last 2 days)"
             rows={newRequests.slice(0, 5)}
@@ -585,6 +608,7 @@ export default async function DashboardPage({
             }}
           />
           <RequestMiniTable
+            heldRequestIds={heldRequestIds}
             title="Overdue requests"
             meta={overdueRequests.length > 0 ? `(${overdueRequests.length})` : undefined}
             rows={overdueRequests.slice(0, 5)}
@@ -635,6 +659,15 @@ export default async function DashboardPage({
   ]);
 
   const all = requests ?? [];
+
+  // Which of these requests currently have an open hold -- shown as a
+  // small badge in the mini-tables/lists below. Doesn't change any
+  // filtering/counting here.
+  const allIds = all.map((r) => r.id);
+  const { data: genericOpenHolds } = allIds.length
+    ? await supabase.from("request_holds").select("request_id").in("request_id", allIds).is("released_at", null)
+    : { data: [] as { request_id: string }[] };
+  const heldRequestIds = new Set((genericOpenHolds ?? []).map((h) => h.request_id as string));
 
   // "Terminal" (no further action needed) is now admin-configured per
   // category/stage instead of a hardcoded status list.
@@ -898,14 +931,21 @@ export default async function DashboardPage({
                         {r.request_number} · {CATEGORY_LABELS[r.category as keyof typeof CATEGORY_LABELS]}
                       </p>
                     </div>
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${statusColor(
-                        r.category,
-                        r.status,
-                        stageList
-                      )}`}
-                    >
-                      {formatStatusLabel(r.category, r.status, stageList)}
+                    <span className="flex items-center gap-1 shrink-0">
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded-full ${statusColor(
+                          r.category,
+                          r.status,
+                          stageList
+                        )}`}
+                      >
+                        {formatStatusLabel(r.category, r.status, stageList)}
+                      </span>
+                      {heldRequestIds.has(r.id) && (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-medium">
+                          On Hold
+                        </span>
+                      )}
                     </span>
                   </Link>
                 </li>
@@ -917,6 +957,7 @@ export default async function DashboardPage({
 
       <div className="space-y-4 mb-6">
         <RequestMiniTable
+          heldRequestIds={heldRequestIds}
           title="Today's requests"
           rows={dueTodayGeneral}
           stageList={stageList}
@@ -925,6 +966,7 @@ export default async function DashboardPage({
           renderExtra={(r) => (r.conclude_date ? format(parseISO(r.conclude_date), "MMM d") : "—")}
         />
         <RequestMiniTable
+          heldRequestIds={heldRequestIds}
           title="New requests"
           meta="(submitted in the last 2 days)"
           rows={newRequestsGeneral.slice(0, 5)}
@@ -934,6 +976,7 @@ export default async function DashboardPage({
           renderExtra={(r) => format(parseISO((r as unknown as { created_at: string }).created_at), "MMM d, h:mm a")}
         />
         <RequestMiniTable
+          heldRequestIds={heldRequestIds}
           title="Overdue requests"
           meta={overdue.length > 0 ? `(${overdue.length})` : undefined}
           rows={overdueSorted.slice(0, 5)}
@@ -970,14 +1013,21 @@ export default async function DashboardPage({
                         {r.request_number} · {CATEGORY_LABELS[r.category as keyof typeof CATEGORY_LABELS]}
                       </p>
                     </div>
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${statusColor(
-                        r.category,
-                        r.status,
-                        stageList
-                      )}`}
-                    >
-                      {formatStatusLabel(r.category, r.status, stageList)}
+                    <span className="flex items-center gap-1 shrink-0">
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded-full ${statusColor(
+                          r.category,
+                          r.status,
+                          stageList
+                        )}`}
+                      >
+                        {formatStatusLabel(r.category, r.status, stageList)}
+                      </span>
+                      {heldRequestIds.has(r.id) && (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-medium">
+                          On Hold
+                        </span>
+                      )}
                     </span>
                   </Link>
                 </li>
@@ -1004,12 +1054,19 @@ export default async function DashboardPage({
                         Due {format(parseISO(r.conclude_date!), "MMM d, yyyy")}
                       </p>
                     </div>
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${
-                        PRIORITY_COLORS[r.priority as keyof typeof PRIORITY_COLORS]
-                      }`}
-                    >
-                      {r.priority}
+                    <span className="flex items-center gap-1 shrink-0">
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded-full ${
+                          PRIORITY_COLORS[r.priority as keyof typeof PRIORITY_COLORS]
+                        }`}
+                      >
+                        {r.priority}
+                      </span>
+                      {heldRequestIds.has(r.id) && (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-medium">
+                          On Hold
+                        </span>
+                      )}
                     </span>
                   </Link>
                 </li>
@@ -1101,6 +1158,7 @@ function RequestMiniTable({
   moreCount,
   moreHref,
   moreLabel,
+  heldRequestIds,
 }: {
   title: string;
   meta?: string;
@@ -1112,6 +1170,7 @@ function RequestMiniTable({
   moreCount?: number;
   moreHref?: string;
   moreLabel?: string;
+  heldRequestIds?: Set<string>;
 }) {
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-5">
@@ -1167,6 +1226,11 @@ function RequestMiniTable({
                       >
                         {formatStatusLabel(r.category, r.status, stageList)}
                       </span>
+                      {heldRequestIds?.has(r.id) && (
+                        <span className="ml-1 text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-medium">
+                          On Hold
+                        </span>
+                      )}
                     </td>
                     <td className="py-2 pl-2 text-slate-500 whitespace-nowrap">{renderExtra(r)}</td>
                   </tr>

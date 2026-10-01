@@ -128,6 +128,20 @@ export default async function RequestsPage({
   const COMPLETED_SUBSTATES = new Set(["waiting_verification", "require_recheck", "verified"]);
   let restrictToIds: string[] | null = null;
 
+  // A third synthetic filter value, "on_hold" -- independent of status
+  // entirely (a held request keeps whatever status it already had, see
+  // migration 032), so like the completed sub-states above it's resolved
+  // to a concrete id list rather than a .eq("status", ...) match. Fetched
+  // once up front since it's a small, single-purpose lookup (not scoped
+  // by department/coordinator -- that scoping is already applied by the
+  // rest of each query chain via .in("id", openHoldIds), so it narrows
+  // correctly without needing to duplicate the role-scoping logic here).
+  const { data: openHoldRows } =
+    status === "on_hold"
+      ? await supabase.from("request_holds").select("request_id").is("released_at", null)
+      : { data: [] as { request_id: string }[] };
+  const openHoldIds = (openHoldRows ?? []).map((h) => h.request_id as string);
+
   if (COMPLETED_SUBSTATES.has(status)) {
     let idQuery = supabase
       .from("requests")
@@ -197,6 +211,9 @@ export default async function RequestsPage({
     if (isStaff && coordinatorId) query = query.eq("owner_id", coordinatorId);
     if (priority) query = query.eq("priority", priority);
     if (status === "work_in_process") query = query.in("status", ["dispatched", "on_site"]);
+    else if (status === "on_hold") {
+      query = query.in("id", openHoldIds.length ? openHoldIds : ["00000000-0000-0000-0000-000000000000"]);
+    }
     else if (restrictToIds !== null) {
       query = query.in("id", restrictToIds.length ? restrictToIds : ["00000000-0000-0000-0000-000000000000"]);
     } else if (status) query = query.eq("status", status);
@@ -250,6 +267,9 @@ export default async function RequestsPage({
     if (isStaff && coordinatorId) query = query.eq("owner_id", coordinatorId);
     if (priority) query = query.eq("priority", priority);
     if (status === "work_in_process") query = query.in("status", ["dispatched", "on_site"]);
+    else if (status === "on_hold") {
+      query = query.in("id", openHoldIds.length ? openHoldIds : ["00000000-0000-0000-0000-000000000000"]);
+    }
     else if (restrictToIds !== null) {
       query = query.in("id", restrictToIds.length ? restrictToIds : ["00000000-0000-0000-0000-000000000000"]);
     } else if (status) query = query.eq("status", status);
@@ -375,6 +395,10 @@ export default async function RequestsPage({
     }
     statusOptions.push(opt);
   }
+  // "On Hold" is independent of status entirely (see migration 032 --
+  // a held request keeps whatever status it already had), so it's
+  // appended once rather than derived from a workflow_stages key.
+  statusOptions.push({ value: "on_hold", label: "On Hold" });
 
   // Same derivation the filter above uses, but scoped to just the
   // completed requests on THIS page -- so RequestsTable can show the
@@ -391,10 +415,10 @@ export default async function RequestsPage({
   // Deliberately doesn't affect filtering/sorting/counts anywhere; a held
   // request stays wherever its status already puts it.
   const pageIds = (requests as any[]).map((r) => r.id as string);
-  const { data: openHoldRows } = pageIds.length
+  const { data: pageOpenHoldRows } = pageIds.length
     ? await supabase.from("request_holds").select("request_id").in("request_id", pageIds).is("released_at", null)
     : { data: [] as { request_id: string }[] };
-  const heldRequestIds = new Set((openHoldRows ?? []).map((h) => h.request_id as string));
+  const heldRequestIds = new Set((pageOpenHoldRows ?? []).map((h) => h.request_id as string));
 
   function pageHref(p: number) {
     const sp = new URLSearchParams();
